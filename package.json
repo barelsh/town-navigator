@@ -1,0 +1,10 @@
+{
+  "name": "town-navigator",
+  "version": "0.1.0",
+  "description": "Demo web app for navigating a town in 3D, generated from real GeoJSON data.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "normalize": "node data/scripts/normalize_coordinates.js"
+  }
+}
