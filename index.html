@@ -20,6 +20,11 @@
     #compass svg { display: block; width: 92px; height: 92px; }
     #compass text { fill: #fff; font-size: 15px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
     #compass .north { fill: #ff6b5e; }
+    #street {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 8px 18px;
+      background: rgba(20, 24, 32, 0.72); color: #fff; border-radius: 10px;
+      font-size: 18px; font-weight: 600; white-space: nowrap; pointer-events: none;
+    }
   </style>
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
@@ -32,6 +37,8 @@
     A D / ← → steer · C switch camera<br />
     Speed: <span id="speed">0</span> km/h
   </div>
+
+  <div id="street" dir="rtl" hidden></div>
 
   <div id="compass">
     <svg viewBox="-50 -50 100 100" aria-hidden="true">
@@ -87,6 +94,7 @@
     const LANE_WIDTH = 3.5;
     const ROAD_BASE_Y = 0.05;
     const ROAD_LAYER_GAP = 0.008;
+    const MIN_DRIVABLE_LAYER = 3;  // service roads and above; excludes tracks and paths
     const LINE_WIDTH = 0.25;
 
     const ASPHALT = 0x3b3f46, PAVERS = 0x8f8a80, CONCRETE = 0xa9a9a4, DIRT = 0x9a7b54;
@@ -187,10 +195,113 @@
       return new THREE.Mesh(geometry, material);
     }
 
+    // Street labels are painted on the road surface and run along it, like map labels.
+    const LABEL_SPACING = 120;         // meters along a road
+    const LABEL_MIN_SEPARATION = 100;  // meters between labels of the same street
+    const LABEL_ROAD_RATIO = 0.55;     // text height as a share of the road width
+    const LABEL_MAX_HEIGHT = 5;        // meters
+    const LABEL_FONT_SIZE = 64;        // pixels
+    const LABEL_CANVAS_HEIGHT = 96;    // pixels
+    const LABEL_CANVAS_PADDING = 16;   // pixels
+    const LABEL_OUTLINE = 10;          // pixels; hides center line dashes behind the text
+
+    const labelPlane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    const streetLabels = new THREE.Group();
+    scene.add(streetLabels);
+
+    const labelMaterials = new Map(); // shared per street name: { material, aspect }
+    const placedLabels = new Map();   // street name -> [[x, z], ...]
+    const labelOrientations = [];     // { mesh, dirX, dirZ, angle } for keeping text upright
+    const streetSegments = [];        // every drawn road segment, for the current-street readout
+
+    function labelMaterial(name) {
+      if (!labelMaterials.has(name)) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        const font = `600 ${LABEL_FONT_SIZE}px system-ui, sans-serif`;
+        context.font = font;
+        canvas.width = Math.ceil(context.measureText(name).width) + LABEL_CANVAS_PADDING * 2;
+        canvas.height = LABEL_CANVAS_HEIGHT;
+
+        context.font = font; // resizing the canvas reset it
+        context.direction = 'rtl';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.lineJoin = 'round';
+        context.lineWidth = LABEL_OUTLINE;
+        context.strokeStyle = '#3b3f46';
+        context.strokeText(name, canvas.width / 2, canvas.height / 2);
+        context.fillStyle = '#f5f1d0';
+        context.fillText(name, canvas.width / 2, canvas.height / 2);
+
+        const map = new THREE.CanvasTexture(canvas);
+        map.colorSpace = THREE.SRGBColorSpace;
+        map.anisotropy = renderer.capabilities.getMaxAnisotropy(); // stays sharp at low view angles
+        labelMaterials.set(name, {
+          material: new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false }),
+          aspect: canvas.width / canvas.height,
+        });
+      }
+      return labelMaterials.get(name);
+    }
+
+    function pointAlong(points, distance) {
+      for (let i = 0; i < points.length - 1; i++) {
+        const [ax, az] = points[i], [bx, bz] = points[i + 1];
+        const length = Math.hypot(bx - ax, bz - az);
+        if (distance <= length && length > 0) {
+          return [ax + (bx - ax) * distance / length, az + (bz - az) * distance / length];
+        }
+        distance -= length;
+      }
+      return points[points.length - 1];
+    }
+
+    function addStreetLabels(name, points, length, roadWidth) {
+      const count = Math.max(1, Math.floor(length / LABEL_SPACING));
+      if (!placedLabels.has(name)) placedLabels.set(name, []);
+      const placed = placedLabels.get(name);
+      const { material, aspect } = labelMaterial(name);
+
+      // Short roads shrink the text so it stays on the road.
+      const fullHeight = Math.min(roadWidth * LABEL_ROAD_RATIO, LABEL_MAX_HEIGHT);
+      const fit = Math.min(1, length / (fullHeight * aspect));
+      const textHeight = fullHeight * fit;
+      const textLength = textHeight * aspect;
+
+      for (let i = 0; i < count; i++) {
+        const center = THREE.MathUtils.clamp((i + 0.5) * length / count, textLength / 2, length - textLength / 2);
+        const [x, z] = pointAlong(points, center);
+        // Streets are split into many segments, and divided roads repeat the name.
+        if (placed.some(([px, pz]) => Math.hypot(px - x, pz - z) < LABEL_MIN_SEPARATION)) continue;
+
+        // Align with the stretch of road under the text, which also evens out curves.
+        const [ax, az] = pointAlong(points, center - textLength / 2);
+        const [bx, bz] = pointAlong(points, center + textLength / 2);
+        const chord = Math.hypot(bx - ax, bz - az);
+        if (chord === 0) continue;
+        placed.push([x, z]);
+
+        const dirX = (bx - ax) / chord, dirZ = (bz - az) / chord;
+        const mesh = new THREE.Mesh(labelPlane, material);
+        mesh.scale.set(textLength, 1, textHeight);
+        mesh.position.set(x, 0, z);
+        streetLabels.add(mesh);
+        labelOrientations.push({ mesh, dirX, dirZ, angle: Math.atan2(-dirZ, dirX) });
+      }
+    }
+
+    // Both cameras look along the car, so text reads upright when it runs toward the car's right.
+    function updateStreetLabels() {
+      const rightX = -Math.cos(heading), rightZ = Math.sin(heading);
+      for (const { mesh, dirX, dirZ, angle } of labelOrientations) {
+        mesh.rotation.y = dirX * rightX + dirZ * rightZ < 0 ? angle + Math.PI : angle;
+      }
+    }
+
     const surfaceBuckets = new Map(); // "layer:color" -> { layer, color, positions }
     const linePositions = [];
     let start = { x: 0, z: 0, heading: 0 };
-    let longestRoad = 0;
 
     function surfacePositions({ layer, color }) {
       const key = `${layer}:${color}`;
@@ -204,7 +315,6 @@
 
       const points = road.geometry.coordinates.map(([x, y]) => [x, -y]);
       const positions = surfacePositions(style);
-      const middle = (points.length - 1) >> 1;
       let travelled = 0;
 
       points.forEach(([x, z]) => addDisc(positions, x, z, style.width / 2));
@@ -213,15 +323,30 @@
         const length = Math.hypot(bx - ax, bz - az);
         if (length === 0) continue;
         addQuad(positions, ax, az, bx, bz, style.width / 2);
+        streetSegments.push({
+          ax, az, bx, bz,
+          halfWidth: style.width / 2,
+          name: road.properties.name,
+          drivable: style.layer >= MIN_DRIVABLE_LAYER,
+        });
         if (style.line) addDashes(linePositions, ax, az, bx, bz, length, travelled);
         travelled += length;
       }
 
-      // The car starts halfway along the longest road with a center line
-      if (style.line && travelled > longestRoad) {
-        const [ax, az] = points[middle], [bx, bz] = points[middle + 1];
-        longestRoad = travelled;
-        start = { x: ax, z: az, heading: Math.atan2(bx - ax, bz - az) };
+      if (road.properties.name && travelled > 0) addStreetLabels(road.properties.name, points, travelled, style.width);
+    }
+
+    // The car starts at the point on a drivable road closest to (0, 0), heading along the road.
+    let closestToOrigin = Infinity;
+    for (const { ax, az, bx, bz, drivable } of streetSegments) {
+      if (!drivable) continue;
+      const dx = bx - ax, dz = bz - az;
+      const t = THREE.MathUtils.clamp(-(ax * dx + az * dz) / (dx * dx + dz * dz), 0, 1);
+      const x = ax + t * dx, z = az + t * dz;
+      const distance = Math.hypot(x, z);
+      if (distance < closestToOrigin) {
+        closestToOrigin = distance;
+        start = { x, z, heading: Math.atan2(dx, dz) };
       }
     }
 
@@ -237,6 +362,7 @@
     const centerLines = flatMesh(linePositions, new THREE.MeshBasicMaterial({ color: 0xf5f1d0 }));
     centerLines.position.y = ROAD_BASE_Y + sortedBuckets.length * ROAD_LAYER_GAP;
     scene.add(centerLines);
+    streetLabels.position.y = centerLines.position.y + ROAD_LAYER_GAP;
 
     // Deterministic random so the town looks the same on every reload
     let seed = 7;
@@ -497,6 +623,38 @@
     camera.position.set(car.position.x - 10, 6, car.position.z - 10);
     camTarget.copy(car.position);
 
+    // ---------- Current street ----------
+    const STREET_UPDATE_INTERVAL = 0.25; // seconds
+    const OFF_ROAD_MARGIN = 3;           // meters past a road's edge that still count as on it
+    const streetReadout = document.getElementById('street');
+    let streetUpdateIn = 0;
+
+    const NAMED_ROAD_PRIORITY = 1000;    // named surfaces beat unnamed ones where roads overlap
+
+    // The road whose surface the point is deepest inside; null when off-road or the road is unnamed.
+    function currentStreet(x, z) {
+      let best = null, bestScore = OFF_ROAD_MARGIN;
+      for (const s of streetSegments) {
+        const edgeDistance = distanceToSegment(x, z, s.ax, s.az, s.bx, s.bz) - s.halfWidth;
+        const score = s.name && edgeDistance <= 0 ? edgeDistance - NAMED_ROAD_PRIORITY : edgeDistance;
+        if (score < bestScore) {
+          bestScore = score;
+          best = s;
+        }
+      }
+      return best?.name ?? null;
+    }
+
+    function updateStreetReadout(dt) {
+      streetUpdateIn -= dt;
+      if (streetUpdateIn > 0) return;
+      streetUpdateIn = STREET_UPDATE_INTERVAL;
+
+      const name = currentStreet(car.position.x, car.position.z);
+      streetReadout.hidden = !name;
+      if (name && streetReadout.textContent !== name) streetReadout.textContent = name;
+    }
+
     // ---------- Compass ----------
     const compassDial = document.getElementById('compass-dial');
     const compassLetters = compassDial.querySelectorAll('text');
@@ -522,6 +680,8 @@
       update(dt);
       updateCamera(dt);
       updateCompass();
+      updateStreetReadout(dt);
+      updateStreetLabels();
       renderer.render(scene, camera);
     });
 
