@@ -8,8 +8,16 @@
 const fs = require('fs');
 const path = require('path');
 
-const INPUT = path.join(__dirname, '..', 'raw.geojson');
-const OUTPUT = path.join(__dirname, '..', 'town_meters.geojson');
+const DATA_DIR = path.join(__dirname, '..');
+const DEFAULT_INPUT = 'raw.geojson';
+
+// raw.geojson -> town_meters.geojson, other.geojson -> town_meters_other.geojson
+function outputPathFor(inputPath) {
+  const inputName = path.basename(inputPath, path.extname(inputPath));
+  const defaultName = path.basename(DEFAULT_INPUT, path.extname(DEFAULT_INPUT));
+  const suffix = inputName === defaultName ? '' : `_${inputName}`;
+  return path.join(DATA_DIR, `town_meters${suffix}.geojson`);
+}
 
 const EARTH_RADIUS_M = 6378137;
 const DEG_TO_RAD = Math.PI / 180;
@@ -98,15 +106,18 @@ function normalize(raw) {
 }
 
 function main() {
-  const raw = JSON.parse(fs.readFileSync(INPUT, 'utf8'));
+  // Optional argument: raw file name, relative to the data dir.
+  const input = path.resolve(DATA_DIR, process.argv[2] ?? DEFAULT_INPUT);
+  const raw = JSON.parse(fs.readFileSync(input, 'utf8'));
   const { collection, pointCount } = normalize(raw);
-  fs.writeFileSync(OUTPUT, `${JSON.stringify(collection)}\n`);
+  const output = outputPathFor(input);
+  fs.writeFileSync(output, `${JSON.stringify(collection)}\n`);
 
   const [minX, minY, maxX, maxY] = collection.bbox;
   console.log(`Features: ${collection.features.length}, points: ${pointCount}`);
   console.log(`Origin: lon ${collection.origin.lon}, lat ${collection.origin.lat}`);
   console.log(`Extent (m): x ${minX} to ${maxX}, y ${minY} to ${maxY}`);
-  console.log(`Wrote ${path.relative(process.cwd(), OUTPUT)}`);
+  console.log(`Wrote ${path.relative(process.cwd(), output)}`);
 }
 
 try {
