@@ -242,8 +242,93 @@
     let seed = 7;
     const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
-    const palette = [0xe76f51, 0xf4a261, 0xe9c46a, 0x2a9d8f, 0x8ecae6, 0xcdb4db, 0xf1faee, 0xb5838d];
-    const roofMat = new THREE.MeshLambertMaterial({ color: 0x5b4636 });
+    const GROUP_COLORS = {
+      unknown: 0xd6d0c4, house: 0xd99a7a, housing: 0x8d9db0,
+      education: 0xf0c040, public: 0x9c89b8, commercial: 0x2a9d8f,
+    };
+    const BUILDING_GROUPS = {
+      detached: 'house', apartments: 'housing', residential: 'housing',
+      school: 'education', kindergarten: 'education',
+      public: 'public', synagogue: 'public',
+      commercial: 'commercial', retail: 'commercial',
+    };
+    const RESIDENTIAL_GROUPS = new Set(['house', 'housing']);
+    const UNKNOWN_SHADES = [0.95, 0.975, 1, 1.025, 1.05]; // keeps untyped blocks from merging
+    const ROOF_SHADE = 0.7;
+
+    const AMENITY_ICONS = {
+      place_of_worship: '✡️', clinic: '🏥', townhall: '🏛️', fire_station: '🚒', police: '🚓',
+      bank: '🏦', library: '📖', theatre: '🎭', marketplace: '🧺',
+    };
+    const BUILDING_ICONS = {
+      retail: '🛒', commercial: '🛒', school: '📚', kindergarten: '🧸', synagogue: '✡️', public: '🏛️',
+    };
+    const ICON_SIZE = 10;       // meters
+    const ICON_CLEARANCE = 2;   // meters above the roof
+    const ICON_CANVAS = 128;    // pixels
+
+    function buildingGroup({ building, shop, office, amenity }) {
+      if (BUILDING_GROUPS[building]) return BUILDING_GROUPS[building];
+      if (shop || office) return 'commercial';
+      return amenity ? 'public' : 'unknown';
+    }
+
+    // Only non-residential buildings get an icon.
+    function buildingIcon(properties) {
+      if (RESIDENTIAL_GROUPS.has(buildingGroup(properties))) return null;
+      const { amenity, shop, office, leisure, building } = properties;
+      if (AMENITY_ICONS[amenity]) return AMENITY_ICONS[amenity];
+      if (shop) return '🛒';
+      if (office) return '💼';
+      if (leisure === 'sports_centre') return '🏋️';
+      return BUILDING_ICONS[building] ?? null;
+    }
+
+    const buildingMaterials = new Map(); // shared per color: [roof, wall]
+    function materialsFor(color) {
+      const key = color.getHex();
+      if (!buildingMaterials.has(key)) {
+        buildingMaterials.set(key, [
+          new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(ROOF_SHADE) }),
+          new THREE.MeshLambertMaterial({ color }),
+        ]);
+      }
+      return buildingMaterials.get(key);
+    }
+
+    const iconMaterials = new Map(); // shared per icon
+    function iconMaterial(icon) {
+      if (!iconMaterials.has(icon)) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = ICON_CANVAS;
+        const context = canvas.getContext('2d');
+        const center = ICON_CANVAS / 2;
+        context.beginPath();
+        context.arc(center, center, center - 4, 0, Math.PI * 2);
+        context.fillStyle = '#fff';
+        context.fill();
+        context.lineWidth = 6;
+        context.strokeStyle = '#141820';
+        context.stroke();
+        context.font = `${ICON_CANVAS * 0.56}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillStyle = '#141820'; // for icons that have no color glyph
+        context.fillText(icon, center, center + ICON_CANVAS * 0.03);
+
+        const map = new THREE.CanvasTexture(canvas);
+        map.colorSpace = THREE.SRGBColorSpace;
+        iconMaterials.set(icon, new THREE.SpriteMaterial({ map }));
+      }
+      return iconMaterials.get(icon);
+    }
+
+    function addBuildingIcon(icon, x, z, roofHeight) {
+      const sprite = new THREE.Sprite(iconMaterial(icon));
+      sprite.scale.setScalar(ICON_SIZE);
+      sprite.position.set(x, roofHeight + ICON_CLEARANCE + ICON_SIZE / 2, z);
+      scene.add(sprite);
+    }
 
     const obstacles = []; // building footprints the car collides with
     let tallestBuilding = 0;
@@ -268,19 +353,24 @@
       const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
       geometry.rotateX(-Math.PI / 2);
 
-      const wallMat = new THREE.MeshLambertMaterial({ color: palette[Math.floor(rand() * palette.length)] });
-      const mesh = new THREE.Mesh(geometry, [roofMat, wallMat]);
+      const group = buildingGroup(feature.properties);
+      const shade = group === 'unknown' ? UNKNOWN_SHADES[Math.floor(rand() * UNKNOWN_SHADES.length)] : 1;
+      const color = new THREE.Color(GROUP_COLORS[group]).multiplyScalar(shade);
+      const mesh = new THREE.Mesh(geometry, materialsFor(color));
       mesh.castShadow = mesh.receiveShadow = true;
       scene.add(mesh);
 
       const ring = outer.slice(0, -1).map(([x, y]) => [x, -y]);
       const xs = ring.map(p => p[0]), zs = ring.map(p => p[1]);
-      obstacles.push({
-        ring,
+      const bounds = {
         minX: Math.min(...xs), maxX: Math.max(...xs),
         minZ: Math.min(...zs), maxZ: Math.max(...zs),
-      });
+      };
+      obstacles.push({ ring, ...bounds });
       tallestBuilding = Math.max(tallestBuilding, height);
+
+      const icon = buildingIcon(feature.properties);
+      if (icon) addBuildingIcon(icon, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, height);
     }
 
     buildings.forEach(addBuilding);
