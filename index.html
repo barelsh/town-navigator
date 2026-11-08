@@ -12,6 +12,14 @@
       font-size: 13px; line-height: 1.5; pointer-events: none;
     }
     #hud b { color: #ffd166; }
+    #compass {
+      position: fixed; top: 12px; right: 12px; padding: 8px 8px 6px;
+      background: rgba(20, 24, 32, 0.72); color: #fff; border-radius: 10px;
+      font-size: 13px; text-align: center; pointer-events: none;
+    }
+    #compass svg { display: block; width: 92px; height: 92px; }
+    #compass text { fill: #fff; font-size: 15px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    #compass .north { fill: #ff6b5e; }
   </style>
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
@@ -23,6 +31,20 @@
     W / ↑ accelerate · S / ↓ brake/reverse<br />
     A D / ← → steer · C switch camera<br />
     Speed: <span id="speed">0</span> km/h
+  </div>
+
+  <div id="compass">
+    <svg viewBox="-50 -50 100 100" aria-hidden="true">
+      <g id="compass-dial">
+        <circle r="47" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="2" />
+        <g transform="translate(0 -34)"><text class="north">N</text></g>
+        <g transform="translate(34 0)"><text>E</text></g>
+        <g transform="translate(0 34)"><text>S</text></g>
+        <g transform="translate(-34 0)"><text>W</text></g>
+      </g>
+      <polygon points="0,-22 7,10 0,5 -7,10" fill="#ffd166" />
+    </svg>
+    <span id="compass-reading">0° N</span>
   </div>
 
   <script type="module">
@@ -38,56 +60,119 @@
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x9fd3ff);
-    scene.fog = new THREE.Fog(0x9fd3ff, 60, 180);
+    scene.fog = new THREE.Fog(0x9fd3ff, 120, 450);
 
-    const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 500);
+    const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 700);
 
     // ---------- Lights ----------
     scene.add(new THREE.HemisphereLight(0xdff1ff, 0x5a7a3a, 0.9));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-    sun.position.set(40, 60, 25);
+    const SUN_OFFSET = new THREE.Vector3(100, 150, 62);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, near: 1, far: 200 });
-    scene.add(sun);
+    Object.assign(sun.shadow.camera, { left: -150, right: 150, top: 150, bottom: -150, near: 1, far: 400 });
+    scene.add(sun, sun.target);
+
+    // ---------- Town data ----------
+    // Hard-coded copy of data/town_meters_raw_min_tidhar.geojson, until it is fetched properly.
+    const TOWN = {"type":"FeatureCollection","generator":"overpass-turbo","copyright":"The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.","timestamp":"2026-11-08T12:12:21Z","features":[{"type":"Feature","id":"way/750048041","properties":{"@id":"way/750048041","addr:city":"ראש העין","addr:housenumber":"9","addr:street":"שייקה אופיר","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[26.74,168.47],[30.39,174.24],[34.26,171.79],[38.57,178.61],[28.59,184.92],[32.87,191.68],[20.49,199.51],[8.25,180.15],[26.74,168.47]]]}},{"type":"Feature","id":"way/750048042","properties":{"@id":"way/750048042","addr:city":"ראש העין","addr:housenumber":"2","addr:street":"זהרה אלפסיה","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[54.99,207.46],[51.87,209.36],[54.64,213.91],[36.28,225.1],[24.91,206.42],[37.36,198.84],[41.3,205.31],[50.33,199.81],[54.99,207.46]]]}},{"type":"Feature","id":"way/750048043","properties":{"@id":"way/750048043","addr:city":"ראש העין","addr:housenumber":"4","addr:street":"זהרה אלפסיה","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[81.13,175.51],[91.05,191.64],[69.65,204.78],[63.08,194.09],[73.24,187.84],[69.9,182.41],[81.13,175.51]]]}},{"type":"Feature","id":"way/750048044","properties":{"@id":"way/750048044","addr:city":"ראש העין","addr:housenumber":"16","addr:street":"ניסים אלוני","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[125.81,-22.73],[122.16,-28.51],[118.29,-26.06],[113.98,-32.88],[123.96,-39.18],[119.68,-45.96],[132.06,-53.78],[144.3,-34.41],[125.81,-22.73]]]}},{"type":"Feature","id":"way/750048045","properties":{"@id":"way/750048045","addr:city":"ראש העין","addr:housenumber":"21","addr:street":"חיים הרצוג","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[97.56,-61.73],[100.68,-63.63],[97.91,-68.18],[116.27,-79.37],[127.64,-60.69],[115.18,-53.11],[111.25,-59.58],[102.22,-54.08],[97.56,-61.73]]]}},{"type":"Feature","id":"way/750048046","properties":{"@id":"way/750048046","addr:city":"ראש העין","addr:housenumber":"19","addr:street":"חיים הרצוג","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[71.43,-29.78],[61.5,-45.91],[82.9,-59.05],[89.47,-48.36],[79.31,-42.11],[82.65,-36.68],[71.43,-29.78]]]}},{"type":"Feature","id":"way/750048047","properties":{"@id":"way/750048047","addr:city":"ראש העין","addr:housenumber":"15","addr:street":"שייקה אופיר","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[-31.13,76.97],[-50,87.88],[-61.45,68.08],[-48.8,60.76],[-44.8,67.66],[-34.63,61.78],[-30.59,68.76],[-34.56,71.06],[-31.13,76.97]]]}},{"type":"Feature","id":"way/750048048","properties":{"@id":"way/750048048","addr:city":"ראש העין","addr:housenumber":"11","addr:street":"חיים הרצוג","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[-52.48,33.84],[-47.88,41.51],[-56.93,46.94],[-53.03,53.46],[-65.48,60.94],[-76.74,42.19],[-58.34,31.15],[-55.6,35.72],[-52.48,33.84]]]}},{"type":"Feature","id":"way/750048049","properties":{"@id":"way/750048049","addr:city":"ראש העין","addr:housenumber":"13","addr:street":"חיים הרצוג","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[-12.17,25.54],[-23.47,32.26],[-26.71,26.79],[-36.93,32.87],[-43.36,22.07],[-21.84,9.28],[-12.17,25.54]]]}},{"type":"Feature","id":"way/750048050","properties":{"@id":"way/750048050","addr:city":"ראש העין","addr:housenumber":"10","addr:street":"ניסים אלוני","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[186.18,70.23],[205.05,59.32],[216.5,79.11],[203.85,86.44],[199.85,79.54],[189.68,85.42],[185.64,78.44],[189.61,76.14],[186.18,70.23]]]}},{"type":"Feature","id":"way/750048051","properties":{"@id":"way/750048051","addr:city":"ראש העין","addr:housenumber":"12","addr:street":"זהרה אלפסיה","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[207.53,113.36],[202.92,105.69],[211.98,100.24],[208.08,93.75],[220.53,86.27],[231.78,105.01],[213.38,116.05],[210.65,111.49],[207.53,113.36]]]}},{"type":"Feature","id":"way/750048052","properties":{"@id":"way/750048052","addr:city":"ראש העין","addr:housenumber":"10","addr:street":"זהרה אלפסיה","building":"apartments","building:levels":"10"},"geometry":{"type":"Polygon","coordinates":[[[167.22,121.66],[178.52,114.94],[181.76,120.4],[191.98,114.33],[198.41,125.12],[176.89,137.91],[167.22,121.66]]]}},{"type":"Feature","id":"way/750048053","properties":{"@id":"way/750048053","addr:city":"ראש העין","addr:housenumber":"8","addr:street":"זהרה אלפסיה","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[126.24,128.03],[114.88,107.99],[123.87,102.89],[121.91,99.42],[135.68,91.62],[144.49,107.16],[146.56,105.99],[152.86,117.11],[140.34,124.21],[138.54,121.05],[126.24,128.03]]]}},{"type":"Feature","id":"way/750048054","properties":{"@id":"way/750048054","addr:city":"ראש העין","addr:housenumber":"6","addr:street":"זהרה אלפסיה","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[82.07,160.7],[69.45,138.6],[79.62,132.79],[78.5,130.81],[92.22,122.97],[103.34,142.44],[94.08,147.73],[96.71,152.33],[82.07,160.7]]]}},{"type":"Feature","id":"way/750048055","properties":{"@id":"way/750048055","addr:city":"ראש העין","addr:housenumber":"13","addr:street":"שייקה אופיר","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[-8.77,70.9],[2.73,63.82],[8.94,73.92],[13.29,71.23],[22.73,86.58],[-0.11,100.63],[-11.11,82.78],[-4.11,78.47],[-8.77,70.9]]]}},{"type":"Feature","id":"way/750048056","properties":{"@id":"way/750048056","addr:city":"ראש העין","addr:housenumber":"11","addr:street":"שייקה אופיר","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[22.69,116.01],[34.19,108.94],[40.42,119.05],[44.76,116.36],[54.2,131.71],[31.35,145.76],[20.36,127.91],[27.36,123.6],[22.69,116.01]]]}},{"type":"Feature","id":"way/750048057","properties":{"@id":"way/750048057","addr:city":"ראש העין","addr:housenumber":"15","addr:street":"חיים הרצוג","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[9.63,48.15],[-2.94,27.76],[5.16,22.76],[2.21,17.98],[18.23,8.09],[32.43,31.1],[24.4,36.06],[25.73,38.22],[9.63,48.15]]]}},{"type":"Feature","id":"way/750048058","properties":{"@id":"way/750048058","addr:city":"ראש העין","addr:housenumber":"17","addr:street":"חיים הרצוג","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[54.49,16.54],[41.92,-3.84],[50.04,-8.84],[47.08,-13.63],[63.1,-23.5],[77.28,-0.49],[69.27,4.45],[70.6,6.61],[54.49,16.54]]]}},{"type":"Feature","id":"way/750048059","properties":{"@id":"way/750048059","addr:city":"ראש העין","addr:housenumber":"12","addr:street":"ניסים אלוני","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[125.58,51.64],[145.98,39.07],[150.97,47.18],[155.77,44.23],[165.63,60.23],[142.62,74.43],[137.69,66.42],[135.52,67.76],[125.58,51.64]]]}},{"type":"Feature","id":"way/750048060","properties":{"@id":"way/750048060","addr:city":"ראש העין","addr:housenumber":"14","addr:street":"ניסים אלוני","building":"apartments","building:levels":"22"},"geometry":{"type":"Polygon","coordinates":[[[94.78,7.31],[115.18,-5.25],[120.17,2.85],[124.96,-0.1],[134.84,15.92],[111.82,30.1],[106.89,22.09],[104.71,23.42],[94.78,7.31]]]}},{"type":"Feature","id":"way/750048062","properties":{"@id":"way/750048062","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[205.7,167.96],[199.19,157.87],[217.89,145.82],[224.4,155.9],[205.7,167.96]]]}},{"type":"Feature","id":"way/750048063","properties":{"@id":"way/750048063","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[232.15,209.31],[220.85,190.06],[222.28,189.21],[219.36,184.24],[237.2,173.77],[240.57,179.51],[244.16,177.4],[250.7,188.54],[248.31,189.94],[252.57,197.2],[245.22,201.52],[243.2,198.07],[237.92,201.17],[240.92,206.26],[235.16,209.64],[234.26,208.08],[232.15,209.31]]]}},{"type":"Feature","id":"way/750048064","properties":{"@id":"way/750048064","addr:housenumber":"7","addr:street":"זהרה אלפסיה","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[240.35,164.34],[228.68,144.46],[230.12,143.62],[227.2,138.66],[245.65,127.83],[249.03,133.58],[252.61,131.49],[259.5,143.21],[257.11,144.6],[261.38,151.88],[253.43,156.55],[251.4,153.1],[246.74,155.84],[249.73,160.93],[243.37,164.67],[242.45,163.11],[240.35,164.34]]]}},{"type":"Feature","id":"way/750048065","properties":{"@id":"way/750048065","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[250.54,240.46],[239.92,223.8],[287.77,193.3],[298.39,209.96],[250.54,240.46]]]}},{"type":"Feature","id":"way/750048079","properties":{"@id":"way/750048079","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[199.95,-59.66],[205.9,-49.99],[201.17,-47.09],[209.31,-33.83],[191.9,-23.13],[184.56,-35.05],[176.79,-30.28],[169.03,-42.92],[190.08,-55.86],[191.09,-54.21],[199.95,-59.66]]]}},{"type":"Feature","id":"way/750048080","properties":{"@id":"way/750048080","addr:city":"ראש העין","addr:housenumber":"23","addr:street":"חיים הרצוג","building":"apartments"},"geometry":{"type":"Polygon","coordinates":[[[150.83,-72.62],[144.89,-82.29],[149.63,-85.19],[141.48,-98.45],[158.91,-109.15],[166.24,-97.23],[174.01,-102],[181.77,-89.36],[160.71,-76.42],[159.7,-78.07],[150.83,-72.62]]]}},{"type":"Feature","id":"way/750048081","properties":{"@id":"way/750048081","addr:city":"ראש העין","addr:housenumber":"25","addr:street":"חיים הרצוג","building":"apartments"},"geometry":{"type":"Polygon","coordinates":[[[220.23,-130.87],[226.34,-121.03],[196.2,-102.3],[190.04,-112.22],[195.11,-115.36],[186.12,-129.83],[205.25,-141.72],[214.28,-127.17],[220.23,-130.87]]]}},{"type":"Feature","id":"way/750048082","properties":{"@id":"way/750048082","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[231.38,-68.85],[225.27,-78.68],[255.41,-97.42],[261.57,-87.5],[256.51,-84.36],[265.5,-69.89],[246.38,-58],[237.33,-72.55],[231.38,-68.85]]]}},{"type":"Feature","id":"way/750048109","properties":{"@id":"way/750048109","addr:city":"ראש העין","addr:housenumber":"14","addr:street":"שייקה אופיר","building":"apartments","building:levels":"9"},"geometry":{"type":"Polygon","coordinates":[[[-95.93,72.8],[-88.65,84.66],[-121.16,104.62],[-128.66,92.41],[-121.59,88.06],[-128.84,76.26],[-109.89,64.63],[-102.42,76.79],[-95.93,72.8]]]}},{"type":"Feature","id":"way/750048110","properties":{"@id":"way/750048110","addr:city":"ראש העין","addr:housenumber":"10","addr:street":"שייקה אופיר","building":"apartments","building:levels":"9"},"geometry":{"type":"Polygon","coordinates":[[[-94.85,146.76],[-102.13,134.91],[-69.62,114.94],[-62.12,127.15],[-69.18,131.49],[-61.93,143.29],[-80.89,154.93],[-88.35,142.78],[-94.85,146.76]]]}},{"type":"Feature","id":"way/750048111","properties":{"@id":"way/750048111","addr:city":"ראש העין","building":"apartments","building:levels":"9"},"geometry":{"type":"Polygon","coordinates":[[[-145.03,176.32],[-152.31,164.45],[-119.79,144.48],[-112.29,156.69],[-119.36,161.03],[-112.12,172.83],[-131.06,184.48],[-138.52,172.32],[-145.03,176.32]]]}},{"type":"Feature","id":"way/750048126","properties":{"@id":"way/750048126","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[-78.94,211.6],[-90.72,192.45],[-36.49,157.64],[-23.64,177.72],[-78.94,211.6]]]}},{"type":"Feature","id":"way/750048131","properties":{"@id":"way/750048131","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[-97.21,253.52],[-64.95,233.99],[-59.1,243.66],[-51.09,238.81],[-34.93,265.53],[-61.94,281.87],[-70.06,268.46],[-77.11,272.72],[-78.93,269.7],[-85.14,273.47],[-97.21,253.52]]]}},{"type":"Feature","id":"way/998209585","properties":{"@id":"way/998209585","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[122.99,291.7],[104.81,264.66],[112.45,259.53],[114.16,262.08],[120.36,257.9],[118.6,255.27],[126.15,250.18],[141.59,273.11],[139.26,274.67],[141.73,278.34],[136.09,282.14],[134.56,279.88],[128.67,283.84],[130.54,286.63],[122.99,291.7]]]}},{"type":"Feature","id":"way/998209586","properties":{"@id":"way/998209586","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[75.93,282.11],[57.74,255.08],[65.39,249.93],[67.1,252.48],[73.3,248.31],[71.53,245.68],[79.09,240.59],[94.53,263.52],[92.21,265.09],[94.68,268.76],[89.03,272.55],[87.5,270.29],[81.6,274.26],[83.47,277.03],[75.93,282.11]]]}},{"type":"Feature","id":"way/998209587","properties":{"@id":"way/998209587","addr:housenumber":"3","addr:street":"זהרה אלפסיה","building":"yes"},"geometry":{"type":"Polygon","coordinates":[[[93.32,242.94],[87.03,233.83],[104.87,221.51],[111.16,230.62],[93.32,242.94]]]}},{"type":"Feature","id":"way/306096464","properties":{"@id":"way/306096464","highway":"residential","name":"זהרה אלפסיה","name:en":"Zahara Elfasia","name:he":"זהרה אלפסיה"},"geometry":{"type":"LineString","coordinates":[[252.4,109.58],[161.82,165.91],[147.88,174.58],[141.4,178.62],[121.23,191.17],[33.97,245.43]]}},{"type":"Feature","id":"way/472309260","properties":{"@id":"way/472309260","highway":"tertiary","name":"יגאל אלון","name:en":"Yigal Alon","name:he":"יגאל אלון","name:ru":"Игаль Алон","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[6.27,415.17],[9.59,414.88],[11.44,414.84],[13.26,414.71],[15.05,414.48],[16.82,414.14],[18.54,413.7],[20.24,413.13],[21.9,412.45],[23.53,411.64],[52.61,393.15],[92.4,367.83],[120.25,350.11],[184.48,309.26],[215.2,289.72],[296.22,238.18],[297.98,237.02],[299.66,235.81],[301.28,234.55],[302.84,233.21],[304.33,231.83],[305.74,230.39],[307.09,228.88],[308.37,227.31],[309.58,225.68],[310.88,222.95]]}},{"type":"Feature","id":"way/472309969","properties":{"@id":"way/472309969","highway":"residential","name":"ניסים אלוני","name:en":"Nisim Aloni","name:he":"ניסים אלוני","oneway":"yes"},"geometry":{"type":"LineString","coordinates":[[126.85,-119.35],[125.3,-117.06],[124.23,-114.57],[123.27,-112.08],[122.47,-109.59],[121.84,-107.1],[121.42,-104.61],[121.26,-102.11],[121.35,-99.63],[121.74,-97.14],[122.45,-94.64]]}},{"type":"Feature","id":"way/472309974","properties":{"@id":"way/472309974","highway":"tertiary","name":"יגאל אלון","name:en":"Yigal Alon","name:he":"יגאל אלון","name:ru":"Игаль Алон","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[321.09,239.86],[319.45,239.96],[317.29,239.99],[315.23,240.18],[313.25,240.51],[311.34,240.95],[309.49,241.51],[307.72,242.16],[305.99,242.91],[304.31,243.73],[302.67,244.61],[227.72,292.29],[207.94,304.87],[194.82,313.22],[29.96,418.08],[28.4,419.33],[26.96,420.6],[25.63,421.89],[24.39,423.19],[23.25,424.52],[22.19,425.85],[21.21,427.21],[20.29,428.58],[19.43,429.95],[18.18,431.7]]}},{"type":"Feature","id":"way/510386703","properties":{"@id":"way/510386703","alt_name:en":"Chaim Hertzog","highway":"secondary","lanes":"2","name":"חיים הרצוג","name:en":"Chaim Herzog","name:he":"חיים הרצוג","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[-109.64,42.58],[-112.37,42.25],[-115.12,42.39],[-117.94,42.71],[-120.8,43.21],[-123.68,43.89],[-126.56,44.75],[-129.41,45.79],[-132.23,47.01],[-135,48.41],[-137.67,49.99],[-297.39,151.54],[-298.9,152.74],[-300.33,154.18],[-301.64,155.77],[-302.82,157.42],[-303.86,159.05],[-304.75,160.58],[-305.48,161.93],[-307.6,167.05]]}},{"type":"Feature","id":"way/510386705","properties":{"@id":"way/510386705","alt_name:en":"Chaim Hertzog","highway":"secondary","lanes":"2","name":"חיים הרצוג","name:en":"Chaim Herzog","name:he":"חיים הרצוג","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[-100,13.61],[105.73,-118.82],[288.05,-234.66],[302.64,-243.93],[309.18,-248.78],[312.27,-254.48]]}},{"type":"Feature","id":"way/510386711","properties":{"@id":"way/510386711","alt_name:en":"Chaim Hertzog","highway":"secondary","lanes":"2","name":"חיים הרצוג","name:en":"Chaim Herzog","name:he":"חיים הרצוג","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[-321.09,148.33],[-318.75,147.98],[-317.08,147.51],[-315.42,147.04],[-313.76,146.55],[-312.11,146.02],[-310.48,145.43],[-308.85,144.77],[-307.24,144.01],[-305.66,143.16],[-304.09,142.17],[-119.31,23.28]]}},{"type":"Feature","id":"way/512333368","properties":{"@id":"way/512333368","alt_name:en":"Chaim Hertzog","highway":"secondary","lanes":"2","name":"חיים הרצוג","name:en":"Chaim Herzog","name:he":"חיים הרצוג","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[320.23,-234.88],[316.07,-235.42],[310.32,-234.84],[308.05,-233.88],[305.28,-232.71],[216.34,-176.2],[126.85,-119.35],[97.22,-100.52],[22.11,-52.79],[-16.08,-28.53],[-73.24,7.79],[-75.41,9.46],[-77.54,11.19],[-79.59,12.99],[-81.55,14.88],[-83.37,16.89],[-85.04,19.02],[-86.52,21.3],[-87.77,23.73],[-89.55,28.1]]}},{"type":"Feature","id":"way/568869356","properties":{"@id":"way/568869356","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-157.21,292.85],[-133.31,200.75],[-83.97,169.26],[-34.87,137.91]]}},{"type":"Feature","id":"way/750047929","properties":{"@id":"way/750047929","highway":"residential","name":"ראובן רובין"},"geometry":{"type":"LineString","coordinates":[[105.73,-118.82],[71.07,-195.53],[37.79,-268.66],[32.11,-283.94],[10.27,-334.87],[2.7,-351.16],[-10.94,-377.3],[-14.52,-385.14],[-39.21,-431.7]]}},{"type":"Feature","id":"way/750047935","properties":{"@id":"way/750047935","highway":"residential","name":"חיים חפר"},"geometry":{"type":"LineString","coordinates":[[-111.83,14.54],[-156.92,-53.73],[-200.79,-120.19],[-208.52,-131.9],[-246.22,-191.8],[-279.45,-242.87]]}},{"type":"Feature","id":"way/750048003","properties":{"@id":"way/750048003","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[178.9,105.88],[168.06,112.17],[163.91,112.43],[159.89,110.7],[156.67,107.88],[150.38,91.82]]}},{"type":"Feature","id":"way/750048004","properties":{"@id":"way/750048004","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[181.6,96.12],[161.65,89.7]]}},{"type":"Feature","id":"way/750048005","properties":{"@id":"way/750048005","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[182.52,113.9],[180.11,110.16],[178.9,105.88],[179.03,102.26],[180.65,98.24],[181.6,96.12],[199.26,86.05]]}},{"type":"Feature","id":"way/750048007","properties":{"@id":"way/750048007","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[113.3,42.7],[118.92,37.58],[128.29,30.61],[139.4,23.25],[149.17,17.9],[160.02,12.53],[184.34,2.63]]}},{"type":"Feature","id":"way/750048008","properties":{"@id":"way/750048008","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[98.49,61.26],[116.35,50.12],[186.76,6.42]]}},{"type":"Feature","id":"way/750048009","properties":{"@id":"way/750048009","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[93.34,80.16],[98.4,77.44],[105.39,76.14],[116.02,76.14],[116.5,76.14],[126.55,79.49],[136.86,84.05],[144.09,88.47],[150.38,91.82],[157.48,92.35],[161.65,89.7],[164.31,83.24],[173.01,63.56]]}},{"type":"Feature","id":"way/750048010","properties":{"@id":"way/750048010","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[66.45,104.58],[62.27,100.52],[60.26,96.5],[59.33,90.87],[60,85.65],[61.73,81.1],[64.68,77.62],[71.91,72.66],[80.35,70.79],[84.76,71.19],[87.44,72.39],[93.34,80.16],[99.9,98.11]]}},{"type":"Feature","id":"way/750048011","properties":{"@id":"way/750048011","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[63.76,107.78],[66.45,104.58],[69.5,100.52]]}},{"type":"Feature","id":"way/750048013","properties":{"@id":"way/750048013","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[107.42,-29.78],[97.95,-26.37],[93.2,-27.76],[89.19,-32.32],[84.76,-40.62]]}},{"type":"Feature","id":"way/750048014","properties":{"@id":"way/750048014","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-32.91,140.99],[-23.7,136.4],[-14.46,131.58],[33.61,99.44],[44.82,96.06],[46.82,93.12],[46.63,85.93],[48.53,76.26],[52.51,70.4],[59.13,65.85],[74.09,58.46],[78.07,54.49],[81.83,48.64],[82.23,48.02],[84.24,37.21],[85.26,22.87],[86.97,9.61],[90.38,0.32],[93.56,-8.54],[95.86,-13.87],[97.19,-20.88],[97.95,-26.37]]}},{"type":"Feature","id":"way/750048015","properties":{"@id":"way/750048015","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[52.89,46.09],[14.06,-17.67],[10.08,-22.02],[4.22,-25.05],[-1.28,-26.94],[-7.4,-27.6],[-16.08,-28.53]]}},{"type":"Feature","id":"way/750048016","properties":{"@id":"way/750048016","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[76.8,47.91],[61.59,40.85],[55.35,37.83],[51.18,33.46],[7.72,-37.28]]}},{"type":"Feature","id":"way/750048017","properties":{"@id":"way/750048017","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[33.61,99.44],[32.05,89.14],[27.31,76.64],[21.07,64.71],[13.4,56.04]]}},{"type":"Feature","id":"way/750048018","properties":{"@id":"way/750048018","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-23.25,49.56],[-3.39,53.37],[13.4,56.04],[36.69,58.46]]}},{"type":"Feature","id":"way/750048019","properties":{"@id":"way/750048019","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-29.12,33.46],[-23.63,42.56],[-23.06,45.96],[-23.25,49.56],[-27.22,53.73],[-42.94,62.44]]}},{"type":"Feature","id":"way/750048021","properties":{"@id":"way/750048021","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[61.47,160.44],[53.17,157.56],[44.73,157.03],[36.16,157.43],[26.56,163.56]]}},{"type":"Feature","id":"way/750048022","properties":{"@id":"way/750048022","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[63.76,107.78],[64.28,135.33],[63.48,151.41],[61.47,160.44],[60.26,165.87],[54.64,176.84],[47.94,183.53],[37.23,190.5]]}},{"type":"Feature","id":"way/750048023","properties":{"@id":"way/750048023","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[141.4,178.62],[95.46,108.77]]}},{"type":"Feature","id":"way/750048024","properties":{"@id":"way/750048024","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[22.11,-52.79],[20.88,-45.7],[19.83,-39.55],[19.83,-33.66],[21.43,-26.16],[24.37,-19.74],[52.76,26.59],[57.05,31.15],[61.87,34.1],[68.03,36.25],[84.24,37.21],[103.65,38.38],[107.94,39.18],[113.3,42.7],[116.24,49.09],[116.35,50.12],[117.58,60.88],[116.02,76.14],[114.1,88.2],[108.74,97.84],[102.96,104.24],[101.24,106.14],[95.46,108.77],[92.4,110.16],[81.42,111.76],[69.63,109.89],[63.76,107.78],[56.24,105.07],[46.87,98.91],[44.82,96.06],[40.71,90.34],[36.43,79.09],[36.43,71.32],[36.69,58.46],[38.3,52.04],[41.25,48.82],[47.94,45.89],[52.89,46.09]]}},{"type":"Feature","id":"way/750048025","properties":{"@id":"way/750048025","highway":"service"},"geometry":{"type":"LineString","coordinates":[[37.36,-13.66],[62.43,-29.11]]}},{"type":"Feature","id":"way/750048026","properties":{"@id":"way/750048026","highway":"service"},"geometry":{"type":"LineString","coordinates":[[135.25,2.49],[154.73,-9.34]]}},{"type":"Feature","id":"way/750048027","properties":{"@id":"way/750048027","highway":"service"},"geometry":{"type":"LineString","coordinates":[[176.56,-9.6],[160.69,-0.18],[154.73,-9.34],[145.69,-23.21],[127.75,-11.7],[121.59,-14.64],[113.56,-13.84],[96.69,-5.81],[93.56,-8.54],[86.24,-14.92],[80.89,-17.59],[75.53,-15.99],[71.78,-15.99],[62.43,-29.11],[52.5,-43.04],[27.59,-25.89]]}},{"type":"Feature","id":"way/750048028","properties":{"@id":"way/750048028","highway":"service"},"geometry":{"type":"LineString","coordinates":[[173.01,63.56],[192.03,52.58],[182.16,32.87]]}},{"type":"Feature","id":"way/750048029","properties":{"@id":"way/750048029","highway":"service"},"geometry":{"type":"LineString","coordinates":[[161.5,45.08],[182.16,32.87],[197.78,23.76]]}},{"type":"Feature","id":"way/750048030","properties":{"@id":"way/750048030","highway":"service"},"geometry":{"type":"LineString","coordinates":[[14.44,2.42],[-12.1,19.47]]}},{"type":"Feature","id":"way/750048031","properties":{"@id":"way/750048031","highway":"service"},"geometry":{"type":"LineString","coordinates":[[-29.18,110.17],[-9.99,99.37],[-21.73,82.13],[-23.25,73.43],[-3.37,58.28],[-3.17,54.3],[-3.39,53.37],[-6.21,41.42],[-3.74,33.46],[-12.1,19.47],[-21.16,4.31],[4.97,-10.84]]}},{"type":"Feature","id":"way/750048032","properties":{"@id":"way/750048032","highway":"service"},"geometry":{"type":"LineString","coordinates":[[-39.92,93.88],[-29.18,110.17],[-24.19,117.74],[-41.06,128.26]]}},{"type":"Feature","id":"way/750048034","properties":{"@id":"way/750048034","highway":"service"},"geometry":{"type":"LineString","coordinates":[[11.21,171.52],[-1.27,150.65]]}},{"type":"Feature","id":"way/750048035","properties":{"@id":"way/750048035","highway":"service"},"geometry":{"type":"LineString","coordinates":[[26.56,163.56],[13.41,141.59]]}},{"type":"Feature","id":"way/750048036","properties":{"@id":"way/750048036","highway":"service"},"geometry":{"type":"LineString","coordinates":[[18.61,138.38],[13.41,141.59],[-1.27,150.65],[-19.58,161.79]]}},{"type":"Feature","id":"way/750048037","properties":{"@id":"way/750048037","highway":"service"},"geometry":{"type":"LineString","coordinates":[[95.3,181.56],[109.99,172.34]]}},{"type":"Feature","id":"way/750048038","properties":{"@id":"way/750048038","highway":"service"},"geometry":{"type":"LineString","coordinates":[[86.97,166.79],[101.17,158.26],[109.99,172.34],[121.23,191.17]]}},{"type":"Feature","id":"way/750048039","properties":{"@id":"way/750048039","highway":"service"},"geometry":{"type":"LineString","coordinates":[[167.07,136.68],[150.47,146.43]]}},{"type":"Feature","id":"way/750048040","properties":{"@id":"way/750048040","highway":"service"},"geometry":{"type":"LineString","coordinates":[[157.98,121.91],[141.51,132.33],[150.47,146.43],[161.82,165.91]]}},{"type":"Feature","id":"way/750048074","properties":{"@id":"way/750048074","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[189.42,-74.47],[176.36,-66.61],[150.41,-50.71]]}},{"type":"Feature","id":"way/750048075","properties":{"@id":"way/750048075","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[213.1,-90.39],[254.89,-116.33]]}},{"type":"Feature","id":"way/750048076","properties":{"@id":"way/750048076","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[195.75,-87.3],[189.23,-98.72],[187.52,-102.88],[184.68,-109.13],[178.44,-117.65]]}},{"type":"Feature","id":"way/750048077","properties":{"@id":"way/750048077","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[207.27,-80.78],[236.86,-34.48]]}},{"type":"Feature","id":"way/750048078","properties":{"@id":"way/750048078","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[193.21,-72.77],[189.42,-74.47],[188.85,-77.31],[189.42,-81.11],[192.83,-85.27],[195.75,-87.3],[199.64,-90],[206.84,-92.65],[210.82,-92.84],[213.1,-90.39],[213.47,-86.97],[211.01,-83.57],[207.27,-80.78],[199.08,-74.66],[193.21,-72.77]]}},{"type":"Feature","id":"way/750048105","properties":{"@id":"way/750048105","highway":"service"},"geometry":{"type":"LineString","coordinates":[[-68.56,85.29],[-99,105.43]]}},{"type":"Feature","id":"way/750048106","properties":{"@id":"way/750048106","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-122.86,120.01],[-117.37,113.76],[-111.87,107.13],[-97.1,94.63],[-72.12,79.75]]}},{"type":"Feature","id":"way/750048107","properties":{"@id":"way/750048107","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-142.17,87.25],[-131,107.7],[-122.86,120.01],[-112.82,137.25],[-109.03,138.38],[-109.03,144.06],[-105.44,147.65],[-105.06,151.83],[-102.79,155.42],[-98.81,156.18],[-95.97,159.97],[-91.8,157.32],[-83.97,169.26]]}},{"type":"Feature","id":"way/750048125","properties":{"@id":"way/750048125","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-14.8,260.21],[-65.01,290.73],[-76.53,299.71],[-74.39,303.59],[-93.78,318.66]]}},{"type":"Feature","id":"way/750048127","properties":{"@id":"way/750048127","highway":"service"},"geometry":{"type":"LineString","coordinates":[[-109.61,227.67],[-93.71,218.36]]}},{"type":"Feature","id":"way/750048128","properties":{"@id":"way/750048128","highway":"service"},"geometry":{"type":"LineString","coordinates":[[-86.44,230.21],[-86.57,233.83],[-102.37,243.2]]}},{"type":"Feature","id":"way/750048130","properties":{"@id":"way/750048130","highway":"service"},"geometry":{"type":"LineString","coordinates":[[-7.12,181.26],[-86.44,230.21],[-93.71,218.36],[-99.43,209.06],[-101.84,207.18],[-104.51,206.91],[-107.47,207.31],[-115.63,212.4],[-118.71,215.88],[-121.39,221.24],[-123,229.54],[-122.2,236.38],[-119.65,242.26],[-98.5,270.92],[-104.12,272.79],[-109.47,271.59],[-122.73,264.5],[-129.42,262.21],[-135.86,279.36],[-95.41,295.15],[-89.39,298.37],[-88.45,300.77],[-96.28,317.03]]}},{"type":"Feature","id":"way/750048402","properties":{"@id":"way/750048402","highway":"service"},"geometry":{"type":"LineString","coordinates":[[222.88,-74.56],[244.72,-39.31]]}},{"type":"Feature","id":"way/750048403","properties":{"@id":"way/750048403","highway":"service"},"geometry":{"type":"LineString","coordinates":[[205.21,-65.46],[227.72,-28.85]]}},{"type":"Feature","id":"way/750048404","properties":{"@id":"way/750048404","highway":"service"},"geometry":{"type":"LineString","coordinates":[[146.37,-57.05],[172.54,-73.23]]}},{"type":"Feature","id":"way/750048405","properties":{"@id":"way/750048405","highway":"service"},"geometry":{"type":"LineString","coordinates":[[236.79,-116.84],[216.19,-150.35]]}},{"type":"Feature","id":"way/750048406","properties":{"@id":"way/750048406","highway":"service"},"geometry":{"type":"LineString","coordinates":[[218.6,-105.36],[236.79,-116.84],[249.43,-124.81]]}},{"type":"Feature","id":"way/750048407","properties":{"@id":"way/750048407","highway":"service"},"geometry":{"type":"LineString","coordinates":[[290.97,-138.45],[254.89,-116.33]]}},{"type":"Feature","id":"way/750048409","properties":{"@id":"way/750048409","highway":"service"},"geometry":{"type":"LineString","coordinates":[[216.34,-176.2],[218.98,-172.1],[249.43,-124.81],[254.89,-116.33],[259.39,-109.35],[287.54,-65.63]]}},{"type":"Feature","id":"way/750048410","properties":{"@id":"way/750048410","highway":"residential","name":"עופרה חזה"},"geometry":{"type":"LineString","coordinates":[[182.14,-0.83],[227.72,-28.85],[236.86,-34.48],[244.72,-39.31],[287.54,-65.63],[305.96,-76.29]]}},{"type":"Feature","id":"way/750048412","properties":{"@id":"way/750048412","highway":"residential","name":"ניסים אלוני","name:en":"Nisim Aloni","name:he":"ניסים אלוני","oneway":"yes"},"geometry":{"type":"LineString","coordinates":[[122.45,-94.64],[120.36,-96.19],[118.22,-97.53],[116.03,-98.66],[113.79,-99.59],[111.51,-100.32],[109.18,-100.86],[106.81,-101.2],[104.39,-101.35],[101.93,-101.3],[97.22,-100.52]]}},{"type":"Feature","id":"way/750048415","properties":{"@id":"way/750048415","highway":"residential","lanes":"1","name":"שייקה אופיר","name:en":"Sheike Ophir","name:he":"שייקה אופיר","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[-80.55,66.58],[-87.3,57.94],[-89.63,55.21],[-92.04,52.62],[-94.53,50.21],[-97.15,48.01],[-99.89,46.08],[-102.79,44.44],[-104.82,43.36]]}},{"type":"Feature","id":"way/750048561","properties":{"@id":"way/750048561","highway":"secondary","junction":"roundabout","lane_markings":"no","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[-89.55,28.1],[-89.75,30.57],[-90.34,32.92],[-91.26,35.11],[-92.5,37.11],[-94.03,38.9],[-95.81,40.42],[-97.81,41.66],[-100,42.58],[-102.34,43.16],[-104.82,43.36],[-107.3,43.16],[-109.64,42.58],[-111.83,41.66],[-113.83,40.42],[-115.61,38.9],[-117.14,37.11],[-118.38,35.11],[-119.31,32.92],[-119.89,30.57],[-120.09,28.1],[-119.89,25.63],[-119.31,23.28],[-118.38,21.08],[-117.14,19.08],[-115.61,17.3],[-113.83,15.77],[-111.83,14.54],[-109.64,13.61],[-107.3,13.04],[-104.82,12.84],[-102.34,13.04],[-100,13.61],[-97.81,14.54],[-95.81,15.77],[-94.03,17.3],[-92.5,19.08],[-91.26,21.08],[-90.34,23.28],[-89.75,25.63],[-89.55,28.1]]}},{"type":"Feature","id":"way/750061164","properties":{"@id":"way/750061164","highway":"residential","name":"ניסים אלוני","name:en":"Nisim Aloni","name:he":"ניסים אלוני"},"geometry":{"type":"LineString","coordinates":[[122.45,-94.64],[146.37,-57.05],[150.41,-50.71],[176.56,-9.6],[182.14,-0.83],[184.34,2.63],[186.76,6.42],[197.78,23.76],[252.4,109.58],[307.51,196.2]]}},{"type":"Feature","id":"way/750061166","properties":{"@id":"way/750061166","highway":"residential","lanes":"1","name":"שייקה אופיר","name:en":"Sheike Ophir","name:he":"שייקה אופיר","oneway":"yes","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[-91.26,35.11],[-91.25,38.41],[-90.91,41.69],[-90.28,44.94],[-89.39,48.18],[-88.26,51.36],[-86.95,54.52],[-85.49,57.62],[-83.91,60.67],[-82.25,63.66],[-80.55,66.58]]}},{"type":"Feature","id":"way/750061167","properties":{"@id":"way/750061167","highway":"residential","name":"שייקה אופיר","name:en":"Sheike Ophir","name:he":"שייקה אופיר"},"geometry":{"type":"LineString","coordinates":[[94.87,340.55],[64.94,293.79],[33.97,245.43],[-7.12,181.26],[-19.58,161.79],[-32.91,140.99],[-34.87,137.91],[-41.06,128.26],[-68.56,85.29],[-72.12,79.75],[-80.55,66.58]]}},{"type":"Feature","id":"way/750066022","properties":{"@id":"way/750066022","highway":"footway","layer":"-1","tunnel":"yes"},"geometry":{"type":"LineString","coordinates":[[7.72,-37.28],[-5.06,-58.1]]}},{"type":"Feature","id":"way/750066023","properties":{"@id":"way/750066023","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[52.89,46.09],[68.3,46.69],[76.8,47.91],[81.83,48.64],[93.2,51.24],[96.95,54.18],[98.56,58.2],[98.49,61.26],[98.29,69.99],[98.4,77.44],[98.56,87.4],[99.9,98.11],[102.96,104.24],[105.26,109.35],[147.88,174.58]]}},{"type":"Feature","id":"way/750066024","properties":{"@id":"way/750066024","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[-5.06,-58.1],[-6.69,-60.75],[-25.71,-91.7]]}},{"type":"Feature","id":"way/998209589","properties":{"@id":"way/998209589","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[141.4,178.62],[143.67,188.26],[147.85,193.41],[152.02,195.01],[155.88,193.73],[157.65,191.64],[158.61,188.26],[158.29,185.54],[157.16,183.29],[155.4,181.68],[147.88,174.58]]}},{"type":"Feature","id":"way/998209590","properties":{"@id":"way/998209590","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[155.88,193.73],[158.97,198.73],[164.67,207.96],[170.11,216.76],[192.39,252.81],[215.2,289.72]]}},{"type":"Feature","id":"way/998209591","properties":{"@id":"way/998209591","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[158.97,198.73],[167.12,193.25],[170.82,191.64],[175.48,190.84],[179.34,191.16],[183.51,193.08],[185.28,196.46],[184.96,199.35],[183.35,201.6],[180.14,203.05],[175.16,203.68],[170.02,205.3],[164.67,207.96],[159.9,211.24],[153.96,216.06],[148.81,221.99],[144.48,228.91],[143.03,233.56],[143.35,239.18],[145.44,241.92],[148.98,243.04],[151.54,241.92],[154.76,238.7],[157.33,234.53],[161.98,225.69],[165.36,220.87],[170.11,216.76],[174.52,214.12],[179.66,213.17],[188.65,213.64],[194.76,213.49],[199.1,211.87],[202.62,209.79],[204.72,207.54],[207.44,203.85],[210.66,201.76],[214.36,202.72],[216.76,205.3],[221.26,209.95],[226.72,220.87],[225.12,226.49],[221.74,231.15],[217.4,236.78],[192.39,252.81]]}},{"type":"Feature","id":"way/1098309659","properties":{"@id":"way/1098309659","bicycle":"designated","foot":"designated","highway":"path","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[75.8,-112.13],[-6.69,-60.75],[-78.52,-16]]}},{"type":"Feature","id":"way/1098309665","properties":{"@id":"way/1098309665","highway":"cycleway","surface":"asphalt"},"geometry":{"type":"LineString","coordinates":[[-70.91,13.04],[-7.4,-27.6],[7.72,-37.28],[20.88,-45.7],[86.45,-87.65]]}},{"type":"Feature","id":"way/1098309666","properties":{"@id":"way/1098309666","highway":"cycleway"},"geometry":{"type":"LineString","coordinates":[[137.04,-119.28],[218.98,-172.1],[248.5,-191.12]]}},{"type":"Feature","id":"way/1099321490","properties":{"@id":"way/1099321490","highway":"cycleway"},"geometry":{"type":"LineString","coordinates":[[227.72,292.29],[230.39,296.31],[304.01,249.76]]}},{"type":"Feature","id":"way/1180179693","properties":{"@id":"way/1180179693","highway":"service"},"geometry":{"type":"LineString","coordinates":[[231.36,-90.88],[259.39,-109.35]]}},{"type":"Feature","id":"way/1180179738","properties":{"@id":"way/1180179738","highway":"footway"},"geometry":{"type":"LineString","coordinates":[[192.39,252.81],[170.73,267.36],[167.67,272.34],[167.67,281.16],[184.48,309.26]]}}],"units":"meters","origin":{"lon":34.9770554,"lat":32.0838586},"bbox":[-321.09,-431.7,321.09,431.7]};
 
     // ---------- Town layout ----------
-    const BLOCK = 20;        // block size
+    // GeoJSON [x east, y north] maps to world (x, 0, -y).
+    const [minX, minY, maxX, maxY] = TOWN.bbox;
+    const buildings = TOWN.features.filter(f => f.properties.building && f.geometry.type === 'Polygon');
+    const roads = TOWN.features.filter(f => f.properties.highway && f.geometry.type === 'LineString');
+
     const ROAD = 8;          // road width
-    const GRID = 5;          // blocks per side
-    const CELL = BLOCK + ROAD;
-    const HALF = (GRID * CELL) / 2;
+    const LEVEL_HEIGHT = 3;  // meters per building level
+    const ASPHALT_Y = 0.05;
+    const LINE_Y = 0.1;
+    const LINE_WIDTH = 0.25;
+    const DASH_LENGTH = 2.2;
+    const DASH_SPACING = 5;
+    const JOINT_SEGMENTS = 12;
+    const CAR_RADIUS = 1.1;
+    const GROUND_MARGIN = 600;
 
     // Grass
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(400, 400),
+      new THREE.PlaneGeometry(maxX - minX + GROUND_MARGIN, maxY - minY + GROUND_MARGIN),
       new THREE.MeshLambertMaterial({ color: 0x6fae4f })
     );
     ground.rotation.x = -Math.PI / 2;
+    ground.position.set((minX + maxX) / 2, 0, -(minY + maxY) / 2);
     ground.receiveShadow = true;
     scene.add(ground);
 
-    // Roads (a grid of asphalt strips) + dashed centre lines
-    const asphalt = new THREE.MeshLambertMaterial({ color: 0x3b3f46 });
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf5f1d0 });
-    const roadLen = GRID * CELL + ROAD;
-    for (let i = 0; i <= GRID; i++) {
-      const p = -HALF + i * CELL;
-      for (const horiz of [true, false]) {
-        const road = new THREE.Mesh(new THREE.PlaneGeometry(horiz ? roadLen : ROAD, horiz ? ROAD : roadLen), asphalt);
-        road.rotation.x = -Math.PI / 2;
-        road.position.set(horiz ? 0 : p, 0.02, horiz ? p : 0);
-        road.receiveShadow = true;
-        scene.add(road);
+    // Roads: all triangles lie flat and are merged into one mesh per material.
+    function addQuad(out, y, ax, az, bx, bz, halfWidth) {
+      const length = Math.hypot(bx - ax, bz - az);
+      const sx = (bz - az) / length * halfWidth;
+      const sz = -(bx - ax) / length * halfWidth;
+      out.push(
+        ax + sx, y, az + sz, ax - sx, y, az - sz, bx - sx, y, bz - sz,
+        ax + sx, y, az + sz, bx - sx, y, bz - sz, bx + sx, y, bz + sz
+      );
+    }
 
-        for (let d = -roadLen / 2 + 2; d < roadLen / 2; d += 5) {
-          const dash = new THREE.Mesh(new THREE.PlaneGeometry(horiz ? 2.2 : 0.25, horiz ? 0.25 : 2.2), lineMat);
-          dash.rotation.x = -Math.PI / 2;
-          dash.position.set(horiz ? d : p, 0.03, horiz ? p : d);
-          scene.add(dash);
+    function addDisc(out, y, x, z, radius) {
+      const point = i => {
+        const angle = (i / JOINT_SEGMENTS) * Math.PI * 2;
+        return [x + Math.cos(angle) * radius, y, z + Math.sin(angle) * radius];
+      };
+      for (let i = 0; i < JOINT_SEGMENTS; i++) out.push(x, y, z, ...point(i + 1), ...point(i));
+    }
+
+    function addDashes(out, ax, az, bx, bz, length, travelled) {
+      const ux = (bx - ax) / length, uz = (bz - az) / length;
+      const end = travelled + length;
+      for (let dash = Math.floor(travelled / DASH_SPACING) * DASH_SPACING; dash < end; dash += DASH_SPACING) {
+        const from = Math.max(dash, travelled) - travelled;
+        const to = Math.min(dash + DASH_LENGTH, end) - travelled;
+        if (to > from) {
+          addQuad(out, LINE_Y, ax + ux * from, az + uz * from, ax + ux * to, az + uz * to, LINE_WIDTH / 2);
         }
       }
     }
+
+    function flatMesh(positions, material) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.computeVertexNormals();
+      return new THREE.Mesh(geometry, material);
+    }
+
+    const asphaltPositions = [];
+    const linePositions = [];
+    let start = { x: 0, z: 0, heading: 0 };
+    let longestRoad = 0;
+
+    for (const road of roads) {
+      const points = road.geometry.coordinates.map(([x, y]) => [x, -y]);
+      const middle = (points.length - 1) >> 1;
+      let travelled = 0;
+
+      points.forEach(([x, z]) => addDisc(asphaltPositions, ASPHALT_Y, x, z, ROAD / 2));
+      for (let i = 0; i < points.length - 1; i++) {
+        const [ax, az] = points[i], [bx, bz] = points[i + 1];
+        const length = Math.hypot(bx - ax, bz - az);
+        if (length === 0) continue;
+        addQuad(asphaltPositions, ASPHALT_Y, ax, az, bx, bz, ROAD / 2);
+        addDashes(linePositions, ax, az, bx, bz, length, travelled);
+        travelled += length;
+      }
+
+      // The car starts halfway along the longest road
+      if (travelled > longestRoad) {
+        const [ax, az] = points[middle], [bx, bz] = points[middle + 1];
+        longestRoad = travelled;
+        start = { x: ax, z: az, heading: Math.atan2(bx - ax, bz - az) };
+      }
+    }
+
+    const asphalt = flatMesh(asphaltPositions, new THREE.MeshLambertMaterial({ color: 0x3b3f46 }));
+    asphalt.receiveShadow = true;
+    scene.add(asphalt, flatMesh(linePositions, new THREE.MeshBasicMaterial({ color: 0xf5f1d0 })));
 
     // Deterministic random so the town looks the same on every reload
     let seed = 7;
@@ -95,114 +180,106 @@
 
     const palette = [0xe76f51, 0xf4a261, 0xe9c46a, 0x2a9d8f, 0x8ecae6, 0xcdb4db, 0xf1faee, 0xb5838d];
     const roofMat = new THREE.MeshLambertMaterial({ color: 0x5b4636 });
-    const windowMat = new THREE.MeshLambertMaterial({ color: 0x2b3a55, emissive: 0x1a2236 });
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x7a5230 });
-    const leafMat = new THREE.MeshLambertMaterial({ color: 0x3f8f3a });
-    const sidewalkMat = new THREE.MeshLambertMaterial({ color: 0xc9c4b8 });
 
-    const obstacles = []; // axis-aligned boxes the car collides with
+    const obstacles = []; // building footprints the car collides with
+    let tallestBuilding = 0;
 
-    function addBuilding(x, z, w, d) {
-      const h = 4 + rand() * 18;
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(w, h, d),
-        new THREE.MeshLambertMaterial({ color: palette[Math.floor(rand() * palette.length)] })
-      );
-      body.position.y = h / 2;
-      body.castShadow = body.receiveShadow = true;
-      g.add(body);
+    function buildingHeight(properties) {
+      const height = parseFloat(properties.height);
+      if (height > 0) return height;
+      const levels = parseFloat(properties['building:levels']);
+      return (levels > 0 ? levels : 1) * LEVEL_HEIGHT;
+    }
 
-      // Flat roof cap
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.5, d + 0.4), roofMat);
-      roof.position.y = h + 0.25;
-      roof.castShadow = true;
-      g.add(roof);
+    // GeoJSON rings repeat their first point at the end; shapes don't need it.
+    const ringPoints = ring => ring.slice(0, -1).map(([x, y]) => new THREE.Vector2(x, y));
 
-      // Window rows on front and back
-      for (let y = 2; y < h - 1; y += 3) {
-        for (let wx = -w / 2 + 1.5; wx <= w / 2 - 1.5; wx += 2.5) {
-          for (const side of [1, -1]) {
-            const win = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.4), windowMat);
-            win.position.set(wx, y, side * (d / 2 + 0.01));
-            if (side < 0) win.rotation.y = Math.PI;
-            g.add(win);
-          }
-        }
+    function addBuilding(feature) {
+      const [outer, ...holes] = feature.geometry.coordinates;
+      const height = buildingHeight(feature.properties);
+      const shape = new THREE.Shape(ringPoints(outer));
+      shape.holes = holes.map(hole => new THREE.Path(ringPoints(hole)));
+
+      // Extrusion runs along +z; rotating it upright also maps y to -z.
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+      geometry.rotateX(-Math.PI / 2);
+
+      const wallMat = new THREE.MeshLambertMaterial({ color: palette[Math.floor(rand() * palette.length)] });
+      const mesh = new THREE.Mesh(geometry, [roofMat, wallMat]);
+      mesh.castShadow = mesh.receiveShadow = true;
+      scene.add(mesh);
+
+      const ring = outer.slice(0, -1).map(([x, y]) => [x, -y]);
+      const xs = ring.map(p => p[0]), zs = ring.map(p => p[1]);
+      obstacles.push({
+        ring,
+        minX: Math.min(...xs), maxX: Math.max(...xs),
+        minZ: Math.min(...zs), maxZ: Math.max(...zs),
+      });
+      tallestBuilding = Math.max(tallestBuilding, height);
+    }
+
+    buildings.forEach(addBuilding);
+
+    function pointInRing(x, z, ring) {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [ax, az] = ring[i], [bx, bz] = ring[j];
+        if ((az > z) !== (bz > z) && x < ((bx - ax) * (z - az)) / (bz - az) + ax) inside = !inside;
       }
-      g.position.set(x, 0, z);
-      scene.add(g);
-      obstacles.push(new THREE.Box3().setFromObject(body));
+      return inside;
     }
 
-    function addTree(x, z) {
-      const g = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 1.6), trunkMat);
-      trunk.position.y = 0.8;
-      const crown = new THREE.Mesh(new THREE.ConeGeometry(1.4, 3.2, 7), leafMat);
-      crown.position.y = 3;
-      trunk.castShadow = crown.castShadow = true;
-      g.add(trunk, crown);
-      g.position.set(x, 0, z);
-      g.scale.setScalar(0.8 + rand() * 0.5);
-      scene.add(g);
-      obstacles.push(new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(x, 1, z), new THREE.Vector3(0.8, 2, 0.8)));
+    function distanceToSegment(x, z, ax, az, bx, bz) {
+      const dx = bx - ax, dz = bz - az;
+      const t = THREE.MathUtils.clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1);
+      return Math.hypot(x - (ax + t * dx), z - (az + t * dz));
     }
 
-    // Fill each block: sidewalk slab + either a park or 2–4 buildings
-    for (let i = 0; i < GRID; i++) {
-      for (let j = 0; j < GRID; j++) {
-        const cx = -HALF + ROAD / 2 + i * CELL + BLOCK / 2;
-        const cz = -HALF + ROAD / 2 + j * CELL + BLOCK / 2;
-
-        const slab = new THREE.Mesh(new THREE.BoxGeometry(BLOCK, 0.2, BLOCK), sidewalkMat);
-        slab.position.set(cx, 0.1, cz);
-        slab.receiveShadow = true;
-        scene.add(slab);
-
-        if (rand() < 0.2) {
-          // Park
-          const lawn = new THREE.Mesh(new THREE.BoxGeometry(BLOCK - 2, 0.25, BLOCK - 2),
-            new THREE.MeshLambertMaterial({ color: 0x7fc15a }));
-          lawn.position.set(cx, 0.12, cz);
-          lawn.receiveShadow = true;
-          scene.add(lawn);
-          for (let t = 0; t < 6; t++) addTree(cx + (rand() - 0.5) * 14, cz + (rand() - 0.5) * 14);
-        } else {
-          // 2x2 lots, some left empty
-          for (const ox of [-4.5, 4.5]) for (const oz of [-4.5, 4.5]) {
-            if (rand() < 0.15) continue;
-            addBuilding(cx + ox, cz + oz, 6 + rand() * 2, 6 + rand() * 2);
-          }
-        }
-      }
+    function touchesRing(x, z, ring) {
+      return ring.some(([ax, az], i) => {
+        const [bx, bz] = ring[(i + 1) % ring.length];
+        return distanceToSegment(x, z, ax, az, bx, bz) < CAR_RADIUS;
+      });
     }
+
+    function hitsBuilding(x, z) {
+      return obstacles.some(b =>
+        x > b.minX - CAR_RADIUS && x < b.maxX + CAR_RADIUS &&
+        z > b.minZ - CAR_RADIUS && z < b.maxZ + CAR_RADIUS &&
+        (pointInRing(x, z, b.ring) || touchesRing(x, z, b.ring)));
+    }
+
+    const outsideTown = (x, z) => x < minX || x > maxX || z < -maxY || z > -minY;
 
     // ---------- Car ----------
+    // Sedan dimensions, in meters
+    const CAR_LENGTH = 4.5, CAR_WIDTH = 1.8, CAR_HEIGHT = 1.45, WHEEL_RADIUS = 0.33;
     const car = new THREE.Group();
-    const carBody = new THREE.Mesh(new THREE.BoxGeometry(2, 0.8, 4), new THREE.MeshLambertMaterial({ color: 0xd62828 }));
-    carBody.position.y = 0.7;
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.7, 2), new THREE.MeshLambertMaterial({ color: 0xf1faee }));
-    cabin.position.set(0, 1.45, -0.3);
+    const carBody = new THREE.Mesh(new THREE.BoxGeometry(CAR_WIDTH, 0.65, CAR_LENGTH), new THREE.MeshLambertMaterial({ color: 0xd62828 }));
+    carBody.position.y = 0.575;
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.55, CAR_HEIGHT - 0.9, 2.3), new THREE.MeshLambertMaterial({ color: 0xf1faee }));
+    cabin.position.set(0, (CAR_HEIGHT + 0.9) / 2, -0.3);
     car.add(carBody, cabin);
-    const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 14);
+    const wheelGeo = new THREE.CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, 0.22, 14);
     wheelGeo.rotateZ(Math.PI / 2);
     const wheelMat = new THREE.MeshLambertMaterial({ color: 0x1b1b1b });
     const wheels = [];
-    for (const [x, z] of [[-1, 1.3], [1, 1.3], [-1, -1.3], [1, -1.3]]) {
+    for (const [x, z] of [[-0.79, 1.45], [0.79, 1.45], [-0.79, -1.45], [0.79, -1.45]]) {
       const w = new THREE.Mesh(wheelGeo, wheelMat);
-      w.position.set(x, 0.4, z);
+      w.position.set(x, WHEEL_RADIUS, z);
       car.add(w);
       wheels.push(w);
     }
     // Headlights
     for (const x of [-0.6, 0.6]) {
       const hl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.05), new THREE.MeshBasicMaterial({ color: 0xfff3b0 }));
-      hl.position.set(x, 0.8, 2.01);
+      hl.position.set(x, 0.7, CAR_LENGTH / 2);
       car.add(hl);
     }
     car.traverse(o => { if (o.isMesh) o.castShadow = true; });
-    car.position.set(-HALF, 0, 0); // start on a road
+    car.position.set(start.x, 0, start.z);
+    car.rotation.y = start.heading;
     scene.add(car);
 
     // ---------- Controls & physics ----------
@@ -213,9 +290,8 @@
     });
     addEventListener('keyup', e => (keys[e.code] = false));
 
-    let speed = 0, heading = 0, camMode = 0;
+    let speed = 0, heading = start.heading, camMode = 0;
     const MAX = 22, ACCEL = 14, BRAKE = 24, FRICTION = 6;
-    const carBox = new THREE.Box3();
     const forward = new THREE.Vector3();
 
     function update(dt) {
@@ -235,16 +311,17 @@
       car.position.addScaledVector(forward, speed * dt);
       car.rotation.y = heading;
 
-      // Collide with buildings/trees and the town edge
-      carBox.setFromCenterAndSize(car.position.clone().setY(1), new THREE.Vector3(2.2, 2, 2.2));
-      const limit = HALF + ROAD / 2 - 1.2;
-      if (obstacles.some(b => b.intersectsBox(carBox)) ||
-          Math.abs(car.position.x) > limit || Math.abs(car.position.z) > limit) {
+      // Collide with buildings and the town edge
+      if (hitsBuilding(car.position.x, car.position.z) || outsideTown(car.position.x, car.position.z)) {
         car.position.copy(prev);
         speed *= -0.3;
       }
 
-      for (const w of wheels) w.rotation.x += speed * dt / 0.4;
+      // Keep the shadow area around the car
+      sun.target.position.copy(car.position);
+      sun.position.copy(car.position).add(SUN_OFFSET);
+
+      for (const w of wheels) w.rotation.x += speed * dt / WHEEL_RADIUS;
       document.getElementById('speed').textContent = Math.round(Math.abs(speed) * 3.6);
     }
 
@@ -253,13 +330,36 @@
     function updateCamera(dt) {
       const offset = camMode === 0
         ? new THREE.Vector3(-Math.sin(heading) * 10, 5, -Math.cos(heading) * 10) // chase
-        : new THREE.Vector3(0, 55, 0.01);                                       // top-down
+        : new THREE.Vector3(0, tallestBuilding + 30, 0);                        // top-down
+      // Top-down, screen up follows the car, so the map turns around it.
+      const up = camMode === 0
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
       camera.position.lerp(car.position.clone().add(offset), 1 - Math.exp(-dt * 5));
+      camera.up.lerp(up, 1 - Math.exp(-dt * 5)).normalize();
       camTarget.lerp(car.position.clone().setY(1), 1 - Math.exp(-dt * 8));
       camera.lookAt(camTarget);
     }
     camera.position.set(car.position.x - 10, 6, car.position.z - 10);
     camTarget.copy(car.position);
+
+    // ---------- Compass ----------
+    const compassDial = document.getElementById('compass-dial');
+    const compassLetters = compassDial.querySelectorAll('text');
+    const compassReading = document.getElementById('compass-reading');
+    const COMPASS_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+    function updateCompass() {
+      // Car forward is (sin, cos) in (x, z) and north is -z, so bearing = 180° - heading.
+      const bearing = THREE.MathUtils.euclideanModulo(180 - THREE.MathUtils.radToDeg(heading), 360);
+
+      // The needle stays pointing up; the dial turns under it, with upright letters.
+      compassDial.setAttribute('transform', `rotate(${-bearing})`);
+      compassLetters.forEach(letter => letter.setAttribute('transform', `rotate(${bearing})`));
+
+      const degrees = Math.round(bearing) % 360;
+      compassReading.textContent = `${degrees}° ${COMPASS_POINTS[Math.round(bearing / 45) % 8]}`;
+    }
 
     // ---------- Loop ----------
     const clock = new THREE.Clock();
@@ -267,6 +367,7 @@
       const dt = Math.min(clock.getDelta(), 0.05);
       update(dt);
       updateCamera(dt);
+      updateCompass();
       renderer.render(scene, camera);
     });
 
