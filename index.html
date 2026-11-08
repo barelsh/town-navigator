@@ -83,11 +83,56 @@
     const buildings = TOWN.features.filter(f => f.properties.building && f.geometry.type === 'Polygon');
     const roads = TOWN.features.filter(f => f.properties.highway && f.geometry.type === 'LineString');
 
-    const ROAD = 8;          // road width
     const LEVEL_HEIGHT = 3;  // meters per building level
-    const ASPHALT_Y = 0.05;
-    const LINE_Y = 0.1;
+    const LANE_WIDTH = 3.5;
+    const ROAD_BASE_Y = 0.05;
+    const ROAD_LAYER_GAP = 0.008;
     const LINE_WIDTH = 0.25;
+
+    const ASPHALT = 0x3b3f46, PAVERS = 0x8f8a80, CONCRETE = 0xa9a9a4, DIRT = 0x9a7b54;
+    const FOOTPATH = 0xc9c4b8, CYCLE_LANE = 0xa8584a;
+
+    // Width in meters; higher layers draw on top where roads meet.
+    // Types not listed here (e.g. proposed roads) are not drawn.
+    const ROAD_STYLES = {
+      motorway:       { width: 12,  color: ASPHALT,    layer: 7, line: true },
+      trunk:          { width: 11,  color: ASPHALT,    layer: 7, line: true },
+      primary:        { width: 10,  color: ASPHALT,    layer: 7, line: true },
+      secondary:      { width: 9,   color: ASPHALT,    layer: 6, line: true },
+      tertiary:       { width: 8,   color: ASPHALT,    layer: 6, line: true },
+      trunk_link:     { width: 5.5, color: ASPHALT,    layer: 5 },
+      primary_link:   { width: 5.5, color: ASPHALT,    layer: 5 },
+      secondary_link: { width: 5.5, color: ASPHALT,    layer: 5 },
+      tertiary_link:  { width: 5.5, color: ASPHALT,    layer: 5 },
+      residential:    { width: 6.5, color: ASPHALT,    layer: 4, line: true },
+      unclassified:   { width: 6,   color: ASPHALT,    layer: 4, line: true },
+      road:           { width: 6,   color: ASPHALT,    layer: 4, line: true },
+      living_street:  { width: 5,   color: ASPHALT,    layer: 4 },
+      service:        { width: 4,   color: ASPHALT,    layer: 3 },
+      track:          { width: 3,   color: DIRT,       layer: 2 },
+      cycleway:       { width: 2.5, color: CYCLE_LANE, layer: 1 },
+      pedestrian:     { width: 4,   color: FOOTPATH,   layer: 0 },
+      footway:        { width: 2,   color: FOOTPATH,   layer: 0 },
+      steps:          { width: 2,   color: FOOTPATH,   layer: 0 },
+      path:           { width: 1.5, color: FOOTPATH,   layer: 0 },
+    };
+
+    const SURFACE_COLORS = {
+      asphalt: ASPHALT, concrete: CONCRETE, paving_stones: PAVERS, sett: PAVERS, ground: DIRT, unpaved: DIRT,
+    };
+
+    function roadStyle({ highway, lanes, surface }) {
+      const style = ROAD_STYLES[highway];
+      if (!style) return null;
+      const laneCount = parseInt(lanes, 10);
+      return {
+        ...style,
+        width: laneCount > 0 ? laneCount * LANE_WIDTH : style.width,
+        color: SURFACE_COLORS[surface] ?? style.color,
+        line: Boolean(style.line) && laneCount !== 1,
+      };
+    }
+
     const DASH_LENGTH = 2.2;
     const DASH_SPACING = 5;
     const JOINT_SEGMENTS = 12;
@@ -104,23 +149,23 @@
     ground.receiveShadow = true;
     scene.add(ground);
 
-    // Roads: all triangles lie flat and are merged into one mesh per material.
-    function addQuad(out, y, ax, az, bx, bz, halfWidth) {
+    // Roads: all triangles lie flat and are merged into one mesh per layer and color.
+    function addQuad(out, ax, az, bx, bz, halfWidth) {
       const length = Math.hypot(bx - ax, bz - az);
       const sx = (bz - az) / length * halfWidth;
       const sz = -(bx - ax) / length * halfWidth;
       out.push(
-        ax + sx, y, az + sz, ax - sx, y, az - sz, bx - sx, y, bz - sz,
-        ax + sx, y, az + sz, bx - sx, y, bz - sz, bx + sx, y, bz + sz
+        ax + sx, 0, az + sz, ax - sx, 0, az - sz, bx - sx, 0, bz - sz,
+        ax + sx, 0, az + sz, bx - sx, 0, bz - sz, bx + sx, 0, bz + sz
       );
     }
 
-    function addDisc(out, y, x, z, radius) {
+    function addDisc(out, x, z, radius) {
       const point = i => {
         const angle = (i / JOINT_SEGMENTS) * Math.PI * 2;
-        return [x + Math.cos(angle) * radius, y, z + Math.sin(angle) * radius];
+        return [x + Math.cos(angle) * radius, 0, z + Math.sin(angle) * radius];
       };
-      for (let i = 0; i < JOINT_SEGMENTS; i++) out.push(x, y, z, ...point(i + 1), ...point(i));
+      for (let i = 0; i < JOINT_SEGMENTS; i++) out.push(x, 0, z, ...point(i + 1), ...point(i));
     }
 
     function addDashes(out, ax, az, bx, bz, length, travelled) {
@@ -130,7 +175,7 @@
         const from = Math.max(dash, travelled) - travelled;
         const to = Math.min(dash + DASH_LENGTH, end) - travelled;
         if (to > from) {
-          addQuad(out, LINE_Y, ax + ux * from, az + uz * from, ax + ux * to, az + uz * to, LINE_WIDTH / 2);
+          addQuad(out, ax + ux * from, az + uz * from, ax + ux * to, az + uz * to, LINE_WIDTH / 2);
         }
       }
     }
@@ -142,37 +187,56 @@
       return new THREE.Mesh(geometry, material);
     }
 
-    const asphaltPositions = [];
+    const surfaceBuckets = new Map(); // "layer:color" -> { layer, color, positions }
     const linePositions = [];
     let start = { x: 0, z: 0, heading: 0 };
     let longestRoad = 0;
 
+    function surfacePositions({ layer, color }) {
+      const key = `${layer}:${color}`;
+      if (!surfaceBuckets.has(key)) surfaceBuckets.set(key, { layer, color, positions: [] });
+      return surfaceBuckets.get(key).positions;
+    }
+
     for (const road of roads) {
+      const style = roadStyle(road.properties);
+      if (!style) continue;
+
       const points = road.geometry.coordinates.map(([x, y]) => [x, -y]);
+      const positions = surfacePositions(style);
       const middle = (points.length - 1) >> 1;
       let travelled = 0;
 
-      points.forEach(([x, z]) => addDisc(asphaltPositions, ASPHALT_Y, x, z, ROAD / 2));
+      points.forEach(([x, z]) => addDisc(positions, x, z, style.width / 2));
       for (let i = 0; i < points.length - 1; i++) {
         const [ax, az] = points[i], [bx, bz] = points[i + 1];
         const length = Math.hypot(bx - ax, bz - az);
         if (length === 0) continue;
-        addQuad(asphaltPositions, ASPHALT_Y, ax, az, bx, bz, ROAD / 2);
-        addDashes(linePositions, ax, az, bx, bz, length, travelled);
+        addQuad(positions, ax, az, bx, bz, style.width / 2);
+        if (style.line) addDashes(linePositions, ax, az, bx, bz, length, travelled);
         travelled += length;
       }
 
-      // The car starts halfway along the longest road
-      if (travelled > longestRoad) {
+      // The car starts halfway along the longest road with a center line
+      if (style.line && travelled > longestRoad) {
         const [ax, az] = points[middle], [bx, bz] = points[middle + 1];
         longestRoad = travelled;
         start = { x: ax, z: az, heading: Math.atan2(bx - ax, bz - az) };
       }
     }
 
-    const asphalt = flatMesh(asphaltPositions, new THREE.MeshLambertMaterial({ color: 0x3b3f46 }));
-    asphalt.receiveShadow = true;
-    scene.add(asphalt, flatMesh(linePositions, new THREE.MeshBasicMaterial({ color: 0xf5f1d0 })));
+    // Each bucket gets its own height so overlapping road surfaces don't flicker.
+    const sortedBuckets = [...surfaceBuckets.values()].sort((a, b) => a.layer - b.layer || a.color - b.color);
+    sortedBuckets.forEach(({ color, positions }, i) => {
+      const surface = flatMesh(positions, new THREE.MeshLambertMaterial({ color }));
+      surface.position.y = ROAD_BASE_Y + i * ROAD_LAYER_GAP;
+      surface.receiveShadow = true;
+      scene.add(surface);
+    });
+
+    const centerLines = flatMesh(linePositions, new THREE.MeshBasicMaterial({ color: 0xf5f1d0 }));
+    centerLines.position.y = ROAD_BASE_Y + sortedBuckets.length * ROAD_LAYER_GAP;
+    scene.add(centerLines);
 
     // Deterministic random so the town looks the same on every reload
     let seed = 7;
