@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Town Navigator</title>
+</head>
+<body>
+  <div id="status">Loading town…</div>
+
+  <div id="hud">
+    <b>Town Navigator</b><br />
+    W / ↑ accelerate · S / ↓ brake/reverse<br />
+    A D / ← → steer · C switch camera<br />
+    Speed: <span id="speed">0</span> km/h
+  </div>
+
+  <div id="street" dir="rtl" hidden></div>
+
+  <div id="compass">
+    <svg viewBox="-50 -50 100 100" aria-hidden="true">
+      <g id="compass-dial">
+        <circle r="47" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="2" />
+        <g transform="translate(0 -34)"><text class="north">N</text></g>
+        <g transform="translate(34 0)"><text>E</text></g>
+        <g transform="translate(0 34)"><text>S</text></g>
+        <g transform="translate(-34 0)"><text>W</text></g>
+      </g>
+      <polygon points="0,-22 7,10 0,5 -7,10" fill="#ffd166" />
+    </svg>
+    <span id="compass-reading">0° N</span>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

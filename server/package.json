@@ -1,0 +1,19 @@
+{
+  "name": "@town-navigator/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.10",
+    "@town-navigator/shared": "*",
+    "fastify": "^5.12.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  }
+}

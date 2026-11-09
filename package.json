@@ -4,7 +4,23 @@
   "description": "Demo web app for navigating a town in 3D, generated from real GeoJSON data.",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
   "scripts": {
+    "dev": "concurrently --names server,client --prefix-colors blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "npm start -w server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "normalize": "node data/scripts/normalize_coordinates.js"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7",
+    "typescript": "^7.0.2"
   }
 }
