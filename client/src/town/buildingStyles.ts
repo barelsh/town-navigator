@@ -1,6 +1,6 @@
 import type { TownProperties } from '@town-navigator/shared';
 
-const LEVEL_HEIGHT = 3; // meters per building level
+export const LEVEL_HEIGHT = 3; // meters per building level
 
 export type BuildingGroup = 'unknown' | 'house' | 'housing' | 'education' | 'public' | 'commercial';
 

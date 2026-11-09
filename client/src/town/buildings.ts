@@ -55,11 +55,12 @@ function iconMaterial(icon: string): THREE.SpriteMaterial {
   return material;
 }
 
-function addBuildingIcon(scene: THREE.Scene, icon: string, x: number, z: number, roofHeight: number): void {
+function addBuildingIcon(scene: THREE.Scene, icon: string, x: number, z: number, roofHeight: number): THREE.Sprite {
   const sprite = new THREE.Sprite(iconMaterial(icon));
   sprite.scale.setScalar(ICON_SIZE);
   sprite.position.set(x, roofHeight + ICON_CLEARANCE + ICON_SIZE / 2, z);
   scene.add(sprite);
+  return sprite;
 }
 
 // GeoJSON rings repeat their first point at the end; shapes don't need it.
@@ -71,6 +72,7 @@ const isBuilding = (feature: TownFeature): feature is BuildingFeature =>
 export interface Buildings {
   obstacles: Obstacle[];
   tallestBuilding: number;
+  pickTargets: Map<THREE.Object3D, BuildingFeature>;
 }
 
 export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
@@ -80,6 +82,7 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
 
   const obstacles: Obstacle[] = [];
   let tallestBuilding = 0;
+  const pickTargets = new Map<THREE.Object3D, BuildingFeature>();
 
   for (const feature of town.features.filter(isBuilding)) {
     const [outer, ...holes] = feature.geometry.coordinates;
@@ -97,6 +100,7 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const mesh = new THREE.Mesh(geometry, materialsFor(color));
     mesh.castShadow = mesh.receiveShadow = true;
     scene.add(mesh);
+    pickTargets.set(mesh, feature);
 
     const ring = outer.slice(0, -1).map(([x, y]): Point2 => [x, -y]);
     const xs = ring.map(p => p[0]), zs = ring.map(p => p[1]);
@@ -108,8 +112,11 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     tallestBuilding = Math.max(tallestBuilding, height);
 
     const icon = buildingIcon(feature.properties);
-    if (icon) addBuildingIcon(scene, icon, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, height);
+    if (icon) {
+      const sprite = addBuildingIcon(scene, icon, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, height);
+      pickTargets.set(sprite, feature);
+    }
   }
 
-  return { obstacles, tallestBuilding };
+  return { obstacles, tallestBuilding, pickTargets };
 }

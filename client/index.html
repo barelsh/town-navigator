@@ -12,6 +12,7 @@
     <b>Town Navigator</b><br />
     W / ↑ accelerate · S / ↓ brake/reverse<br />
     A D / ← → steer · C switch camera<br />
+    Click a building for details<br />
     Speed: <span id="speed">0</span> km/h
   </div>
 
@@ -29,6 +30,17 @@
       <polygon points="0,-22 7,10 0,5 -7,10" fill="#ffd166" />
     </svg>
     <span id="compass-reading">0° N</span>
+  </div>
+
+  <div id="building-tooltip" role="dialog" aria-label="Building details" hidden>
+    <div class="tip-head">
+      <span class="tip-icon" id="tip-icon"></span>
+      <div class="tip-title" id="tip-title" dir="auto"></div>
+      <button id="tip-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="tip-sub"><span class="swatch" id="tip-swatch"></span><span id="tip-group"></span><span id="tip-id"></span></div>
+    <dl class="tip-facts" id="tip-facts"></dl>
+    <dl class="tip-tags" id="tip-tags"></dl>
   </div>
 
   <script type="module" src="/src/main.ts"></script>

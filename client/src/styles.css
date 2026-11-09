@@ -26,3 +26,33 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
   background: rgba(20, 24, 32, 0.72); color: #fff; border-radius: 10px;
   font-size: 18px; font-weight: 600; white-space: nowrap; pointer-events: none;
 }
+
+#building-tooltip {
+  position: fixed; left: 0; top: 0; z-index: 10; width: min(290px, calc(100vw - 24px));
+  background: #141820; color: #fff; border-radius: 10px;
+  font-size: 13px; line-height: 1.45; box-shadow: 0 8px 24px rgba(10, 14, 20, 0.35);
+}
+#building-tooltip::after {
+  content: ""; position: absolute; left: var(--caret, 50%); bottom: -6px; width: 12px; height: 12px;
+  margin-left: -6px; background: #141820; transform: rotate(45deg);
+}
+#building-tooltip.below::after { bottom: auto; top: -6px; }
+.tip-head { display: flex; align-items: flex-start; gap: 8px; padding: 11px 10px 0 14px; }
+.tip-icon { font-size: 20px; line-height: 1.2; }
+.tip-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: #ffd166; overflow-wrap: anywhere; }
+#tip-close {
+  all: unset; cursor: pointer; width: 24px; height: 24px; flex: none; text-align: center; line-height: 24px;
+  border-radius: 5px; color: #a9b3bf; font-size: 17px;
+}
+#tip-close:hover { background: #333b47; color: #fff; }
+#tip-close:focus-visible { outline: 2px solid #ffd166; }
+.tip-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 2px 14px 10px; color: #a9b3bf; font-size: 12px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; }
+.tip-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 9px 14px; border-block: 1px solid #333b47; }
+.tip-facts div { min-width: 0; }
+.tip-facts dt { color: #a9b3bf; font-size: 11px; }
+.tip-facts dd { margin: 0; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tip-facts small { display: block; font-size: 10.5px; font-weight: 400; color: #a9b3bf; }
+.tip-tags { max-height: 132px; overflow-y: auto; margin: 0; padding: 8px 14px 12px; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
+.tip-tags dt { font: 11.5px/1.6 ui-monospace, Menlo, monospace; color: #a9b3bf; }
+.tip-tags dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

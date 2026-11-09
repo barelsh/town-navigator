@@ -5,10 +5,13 @@ import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
 import { DEFAULT_TOWN } from './config.ts';
+import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
 import { createStreetReadout } from './hud/streetReadout.ts';
 import { addGround, createStage } from './scene/stage.ts';
+import { buildingInfo } from './town/buildingInfo.ts';
+import { createBuildingPicker } from './town/buildingPicker.ts';
 import { addBuildings } from './town/buildings.ts';
 import { currentStreet, hitsBuilding, outsideTown } from './town/collision.ts';
 import { addRoads } from './town/roads.ts';
@@ -26,7 +29,7 @@ async function main(): Promise<void> {
 
     addGround(scene, town.bbox);
     const roads = addRoads(scene, renderer, town);
-    const { obstacles, tallestBuilding } = addBuildings(scene, town);
+    const { obstacles, tallestBuilding, pickTargets } = addBuildings(scene, town);
 
     const carModel = createCarModel();
     scene.add(carModel.group);
@@ -38,6 +41,17 @@ async function main(): Promise<void> {
     const compass = createCompass();
     const streetReadout = createStreetReadout((x, z) => currentStreet(roads.segments, x, z));
 
+    const tooltip = createBuildingTooltip();
+    const picker = createBuildingPicker(camera, pickTargets);
+    renderer.domElement.addEventListener('click', e => {
+      const hit = picker.pick(e.clientX, e.clientY, renderer.domElement);
+      if (hit) tooltip.open(buildingInfo(hit.feature), hit.point);
+      else tooltip.close();
+    });
+    addEventListener('keydown', e => {
+      if (e.code === 'Escape') tooltip.close();
+    });
+
     function tick(dt: number): void {
       car.update(dt);
       stage.moveSunTo(car.position);
@@ -47,6 +61,7 @@ async function main(): Promise<void> {
       streetReadout.update(dt, car.position);
       roads.labels.update(car.heading);
       renderer.render(scene, camera);
+      tooltip.update(camera); // after render, which refreshes the camera matrices
     }
 
     const clock = new THREE.Clock();
