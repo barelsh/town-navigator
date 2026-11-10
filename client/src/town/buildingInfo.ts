@@ -1,6 +1,6 @@
 import type { Position } from 'geojson';
 import type { BuildingFeature, TownProperties } from '@town-navigator/shared';
-import { buildingGroup, buildingHeight, buildingIcon, GROUP_COLORS, LEVEL_HEIGHT, type BuildingGroup } from './buildingStyles.ts';
+import { buildingGroup, buildingHeight, defaultLevels, buildingIcon, GROUP_COLORS, LEVEL_HEIGHT, type BuildingGroup } from './buildingStyles.ts';
 
 export interface BuildingInfo {
   id: string;
@@ -38,7 +38,8 @@ function heightSource(properties: TownProperties): string {
   if (parseFloat(properties.height ?? '') > 0) return 'from height tag';
   const levels = parseFloat(properties['building:levels'] ?? '');
   if (levels > 0) return `${levels} ${levels === 1 ? 'level' : 'levels'} × ${LEVEL_HEIGHT} m`;
-  return 'assumed 1 level';
+  const fallback = defaultLevels(properties);
+  return `assumed ${fallback} ${fallback === 1 ? 'level' : 'levels'}`;
 }
 
 // Shoelace formula. GeoJSON rings repeat their first point at the end.

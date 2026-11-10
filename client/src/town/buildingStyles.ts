@@ -46,9 +46,16 @@ export function buildingIcon(properties: TownProperties): string | null {
   return BUILDING_ICONS[building ?? ''] ?? null;
 }
 
+export const DEFAULT_SCHOOL_LEVELS = 3;
+
+// Levels assumed when neither height nor building:levels is tagged.
+export function defaultLevels({ building }: TownProperties): number {
+  return building === 'school' ? DEFAULT_SCHOOL_LEVELS : 1;
+}
+
 export function buildingHeight(properties: TownProperties): number {
   const height = parseFloat(properties.height ?? '');
   if (height > 0) return height;
   const levels = parseFloat(properties['building:levels'] ?? '');
-  return (levels > 0 ? levels : 1) * LEVEL_HEIGHT;
+  return (levels > 0 ? levels : defaultLevels(properties)) * LEVEL_HEIGHT;
 }

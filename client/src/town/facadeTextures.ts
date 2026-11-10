@@ -7,7 +7,7 @@ const GREY = '#9aa1a6', GLASS = '#5a6b7d', SHUTTER = '#c6c9c7', SHUTTER_LINE = '
 
 type Draw = (context: CanvasRenderingContext2D, width: number, height: number) => void;
 
-function canvasTexture(width: number, height: number, draw: Draw): THREE.CanvasTexture {
+export function canvasTexture(width: number, height: number, draw: Draw): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
