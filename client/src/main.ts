@@ -36,7 +36,8 @@ async function main(): Promise<void> {
     const car = createCarController(carModel, roads.start, (x, z) =>
       hitsBuilding(obstacles, x, z) || outsideTown(town.bbox, x, z));
 
-    const followCamera = createFollowCamera(camera, car.position, tallestBuilding);
+    const occluders = [...pickTargets.keys()].filter(object => object instanceof THREE.Mesh);
+    const followCamera = createFollowCamera(camera, car.position, tallestBuilding, occluders);
     const speedDisplay = createSpeedDisplay();
     const compass = createCompass();
     const streetReadout = createStreetReadout((x, z) => currentStreet(roads.segments, x, z));
