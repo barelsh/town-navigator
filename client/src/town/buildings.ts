@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Position } from 'geojson';
 import type { BuildingFeature, Town, TownFeature } from '@town-navigator/shared';
+import { createApartmentFacades, floorCount, MIN_FACADE_FLOORS } from './apartmentFacade.ts';
 import { buildingGroup, buildingHeight, buildingIcon, GROUP_COLORS, ROOF_SHADE, UNKNOWN_SHADES } from './buildingStyles.ts';
 import type { Obstacle } from './collision.ts';
 import type { Point2 } from './geometry.ts';
@@ -83,6 +84,7 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
   const obstacles: Obstacle[] = [];
   let tallestBuilding = 0;
   const pickTargets = new Map<THREE.Object3D, BuildingFeature>();
+  const facades = createApartmentFacades();
 
   for (const feature of town.features.filter(isBuilding)) {
     const [outer, ...holes] = feature.geometry.coordinates;
@@ -97,12 +99,16 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const group = buildingGroup(feature.properties);
     const shade = group === 'unknown' ? UNKNOWN_SHADES[Math.floor(rand() * UNKNOWN_SHADES.length)] : 1;
     const color = new THREE.Color(GROUP_COLORS[group]).multiplyScalar(shade);
-    const mesh = new THREE.Mesh(geometry, materialsFor(color));
+    const [roof, wall] = materialsFor(color);
+    const floors = floorCount(feature.properties, height);
+    const hasFacade = feature.properties.building === 'apartments' && floors >= MIN_FACADE_FLOORS;
+    const mesh = new THREE.Mesh(geometry, [roof, hasFacade ? facades.wallMaterial : wall]);
     mesh.castShadow = mesh.receiveShadow = true;
     scene.add(mesh);
     pickTargets.set(mesh, feature);
 
     const ring = outer.slice(0, -1).map(([x, y]): Point2 => [x, -y]);
+    if (hasFacade) facades.add(String(feature.id ?? feature.properties['@id'] ?? ''), ring, height, floors);
     const xs = ring.map(p => p[0]), zs = ring.map(p => p[1]);
     const bounds = {
       minX: Math.min(...xs), maxX: Math.max(...xs),
@@ -117,6 +123,7 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
       pickTargets.set(sprite, feature);
     }
   }
+  facades.finish(scene);
 
   return { obstacles, tallestBuilding, pickTargets };
 }
