@@ -56,3 +56,57 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
 .tip-tags { max-height: 132px; overflow-y: auto; margin: 0; padding: 8px 14px 12px; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
 .tip-tags dt { font: 11.5px/1.6 ui-monospace, Menlo, monospace; color: #a9b3bf; }
 .tip-tags dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+#hud kbd, #settings-tip kbd, #settings-dialog kbd { font: 11px ui-monospace, Menlo, monospace; padding: 0 4px; border: 1px solid #333b47; border-radius: 3px; }
+
+#settings-wrap { position: fixed; right: 16px; bottom: 16px; }
+#settings-button {
+  width: 44px; height: 44px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+  background: rgba(20, 24, 32, 0.72); color: #fff; display: grid; place-items: center;
+}
+#settings-button:hover { background: rgba(20, 24, 32, 0.9); }
+#settings-button:focus-visible, #settings-dialog button:focus-visible, #settings-dialog input:focus-visible { outline: 2px solid #ffd166; outline-offset: 2px; }
+#settings-button svg { width: 22px; height: 22px; }
+#settings-tip {
+  position: absolute; right: calc(100% + 8px); top: 50%; transform: translateY(-50%); white-space: nowrap;
+  padding: 5px 9px; background: #141820; color: #fff; border-radius: 6px; font-size: 12px;
+  box-shadow: 0 4px 12px rgba(10, 14, 20, 0.35); opacity: 0; pointer-events: none; transition: opacity 0.12s;
+}
+#settings-tip kbd { margin-left: 4px; color: #ffd166; }
+#settings-button:hover + #settings-tip, #settings-button:focus-visible + #settings-tip { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { #settings-tip { transition: none; } }
+
+#settings-dialog {
+  width: min(360px, calc(100vw - 32px)); box-sizing: border-box; padding: 16px 18px 18px; border: 0; border-radius: 10px;
+  background: #141820; color: #fff; font-size: 13px; line-height: 1.5; box-shadow: 0 12px 32px rgba(10, 14, 20, 0.45);
+}
+#settings-dialog::backdrop { background: rgba(10, 12, 16, 0.4); }
+#settings-form { display: grid; gap: 14px; }
+#settings-dialog .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#settings-dialog h3 { margin: 0; font-size: 17px; font-weight: 600; color: #ffd166; }
+#settings-dialog .close { all: unset; cursor: pointer; width: 26px; height: 26px; text-align: center; line-height: 26px; border-radius: 5px; color: #a9b3bf; font-size: 18px; }
+#settings-dialog .close:hover { background: #333b47; color: #fff; }
+#settings-dialog fieldset { border: 0; border-top: 1px solid #333b47; margin: 0; padding: 12px 0 0; display: grid; gap: 10px; min-width: 0; }
+#settings-dialog legend { font-size: 14px; font-weight: 600; padding: 0; }
+#settings-dialog .hint { color: #a9b3bf; font-size: 12px; margin: 0; }
+#settings-dialog .coords { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#settings-dialog label { display: grid; gap: 4px; font-size: 12px; color: #a9b3bf; }
+#settings-dialog input {
+  font: 14px ui-monospace, Menlo, monospace; color: #fff; background: #0d1016; border: 1px solid #333b47;
+  border-radius: 5px; padding: 6px 8px; width: 100%; box-sizing: border-box; font-variant-numeric: tabular-nums;
+}
+#settings-dialog input[aria-invalid="true"] { border-color: #ff9c8a; }
+#settings-dialog .error { color: #ff9c8a; font-size: 12px; margin: 0; }
+#settings-dialog .preview { font-size: 12.5px; padding: 8px 10px; border-radius: 6px; background: #1d222c; display: grid; gap: 2px; }
+#settings-dialog .preview b { font-weight: 600; }
+#settings-dialog .preview .warn { color: #ffd166; }
+#settings-dialog .quick { display: flex; flex-wrap: wrap; gap: 8px; }
+#settings-dialog button.secondary, #settings-dialog button.primary {
+  font: 600 13px system-ui, sans-serif; border-radius: 6px; padding: 7px 12px; cursor: pointer; border: 1px solid #333b47;
+}
+#settings-dialog button.secondary { background: transparent; color: #fff; }
+#settings-dialog button.secondary:hover { background: #333b47; }
+#settings-dialog button.primary { background: #ffd166; color: #141820; border-color: #ffd166; }
+#settings-dialog button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+#settings-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+#settings-dialog .saved-note { color: #a9b3bf; font-size: 12px; margin: 0; }

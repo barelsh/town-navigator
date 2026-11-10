@@ -13,6 +13,7 @@
     W / ↑ accelerate · S / ↓ brake/reverse<br />
     A D / ← → steer · C switch camera<br />
     Click a building for details<br />
+    <kbd>P</kbd> settings<br />
     Speed: <span id="speed">0</span> km/h
   </div>
 
@@ -42,6 +43,38 @@
     <dl class="tip-facts" id="tip-facts"></dl>
     <dl class="tip-tags" id="tip-tags"></dl>
   </div>
+
+  <div id="settings-wrap">
+    <button id="settings-button" type="button" aria-label="Settings" aria-keyshortcuts="P" aria-describedby="settings-tip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+    <span id="settings-tip" role="tooltip">Settings <kbd>P</kbd></span>
+  </div>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form" novalidate>
+      <div class="dlg-head"><h3 id="settings-title">Settings</h3><button class="close" type="button" id="settings-close" aria-label="Close without saving">×</button></div>
+      <fieldset>
+        <legend>Starting point</legend>
+        <p class="hint">The car starts on the drivable road closest to this point. 0, 0 is the town center.</p>
+        <div class="coords">
+          <label for="settings-east">East (m)<input id="settings-east" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="settings-error"></label>
+          <label for="settings-north">North (m)<input id="settings-north" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="settings-error"></label>
+        </div>
+        <p class="error" id="settings-error" hidden></p>
+        <div class="preview" id="settings-preview" aria-live="polite"></div>
+        <div class="quick">
+          <button class="secondary" type="button" id="settings-use-car">Use car position</button>
+          <button class="secondary" type="button" id="settings-reset">Reset to 0, 0</button>
+        </div>
+      </fieldset>
+      <p class="saved-note" id="settings-note" hidden></p>
+      <div class="actions">
+        <button class="secondary" type="button" id="settings-cancel">Cancel</button>
+        <button class="primary" type="submit" id="settings-save">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

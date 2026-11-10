@@ -8,13 +8,15 @@ import { DEFAULT_TOWN } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
+import { createSettingsDialog } from './hud/settingsDialog.ts';
 import { createStreetReadout } from './hud/streetReadout.ts';
 import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
 import { createBuildingPicker } from './town/buildingPicker.ts';
 import { addBuildings } from './town/buildings.ts';
 import { currentStreet, hitsBuilding, outsideTown } from './town/collision.ts';
-import { addRoads } from './town/roads.ts';
+import { fromWorld, loadSettings, saveSettings, toWorld, townSettings } from './settings/settingsStore.ts';
+import { addRoads, findStart } from './town/roads.ts';
 
 const MAX_FRAME_TIME = 0.05; // seconds
 
@@ -33,7 +35,9 @@ async function main(): Promise<void> {
 
     const carModel = createCarModel();
     scene.add(carModel.group);
-    const car = createCarController(carModel, roads.start, (x, z) =>
+    const settings = loadSettings();
+    const target = toWorld(townSettings(settings, DEFAULT_TOWN).startPoint);
+    const car = createCarController(carModel, findStart(roads.segments, target), (x, z) =>
       hitsBuilding(obstacles, x, z) || outsideTown(town.bbox, x, z));
 
     const occluders = [...pickTargets.keys()].filter(object => object instanceof THREE.Mesh);
@@ -49,8 +53,27 @@ async function main(): Promise<void> {
       if (hit) tooltip.open(buildingInfo(hit.feature), hit.point);
       else tooltip.close();
     });
+
+    const settingsDialog = createSettingsDialog({
+      initial: () => townSettings(loadSettings(), DEFAULT_TOWN).startPoint,
+      carPoint: () => fromWorld(car.position),
+      preview: point => findStart(roads.segments, toWorld(point)),
+      bounds: town.bbox,
+      onOpenChange: open => {
+        car.setInputEnabled(!open);
+        followCamera.setInputEnabled(!open);
+      },
+      onSave: point => {
+        const latest = loadSettings();
+        latest.towns[DEFAULT_TOWN] = { startPoint: point };
+        car.resetTo(findStart(roads.segments, toWorld(point)));
+        followCamera.jumpTo(car.position, car.heading);
+        return saveSettings(latest); // false shows the "Couldn't save" note
+      },
+    });
+
     addEventListener('keydown', e => {
-      if (e.code === 'Escape') tooltip.close();
+      if (e.code === 'Escape' && !settingsDialog.isOpen) tooltip.close();
     });
 
     function tick(dt: number): void {

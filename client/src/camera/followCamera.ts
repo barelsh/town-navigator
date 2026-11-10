@@ -9,6 +9,10 @@ const CHASE_HEIGHT = 5;        // meters above the car
 
 export interface FollowCamera {
   update(dt: number, carPosition: THREE.Vector3, heading: number): void;
+  /** Turns the camera-switch key on or off. */
+  setInputEnabled(enabled: boolean): void;
+  /** Snaps to the car instead of gliding there. */
+  jumpTo(carPosition: THREE.Vector3, heading: number): void;
 }
 
 export function createFollowCamera(
@@ -19,14 +23,32 @@ export function createFollowCamera(
 ): FollowCamera {
   const collision = createCameraCollision(occluders);
   let mode = CHASE;
+  let inputEnabled = true;
   addEventListener('keydown', e => {
-    if (e.code === 'KeyC') mode = (mode + 1) % CAMERA_MODES;
+    if (inputEnabled && e.code === 'KeyC') mode = (mode + 1) % CAMERA_MODES;
   });
 
   const target = startPosition.clone();
   camera.position.set(startPosition.x - 10, 6, startPosition.z - 10);
 
   return {
+    setInputEnabled(enabled) {
+      inputEnabled = enabled;
+    },
+    jumpTo(carPosition, heading) {
+      target.copy(carPosition).setY(1);
+      if (mode === TOP_DOWN) {
+        camera.position.set(carPosition.x, tallestBuilding + TOP_DOWN_CLEARANCE, carPosition.z);
+        camera.up.set(Math.sin(heading), 0, Math.cos(heading));
+      } else {
+        camera.position.set(
+          carPosition.x - Math.sin(heading) * CHASE_DISTANCE, carPosition.y + CHASE_HEIGHT,
+          carPosition.z - Math.cos(heading) * CHASE_DISTANCE);
+        camera.up.set(0, 1, 0);
+      }
+      camera.lookAt(target);
+      collision.reset();
+    },
     update(dt, carPosition, heading) {
       const offset = mode === TOP_DOWN
         ? new THREE.Vector3(0, tallestBuilding + TOP_DOWN_CLEARANCE, 0)

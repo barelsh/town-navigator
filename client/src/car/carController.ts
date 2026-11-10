@@ -9,6 +9,10 @@ export interface CarController {
   readonly heading: number;
   readonly speed: number;
   update(dt: number): void;
+  /** Turns driving keys on or off; turning them off releases any held key. */
+  setInputEnabled(enabled: boolean): void;
+  /** Puts the car at a start, stopped. */
+  resetTo(start: StartPosition): void;
 }
 
 export function createCarController(
@@ -17,7 +21,8 @@ export function createCarController(
   isBlocked: (x: number, z: number) => boolean
 ): CarController {
   const keys: Record<string, boolean> = {};
-  addEventListener('keydown', e => { keys[e.code] = true; });
+  let inputEnabled = true;
+  addEventListener('keydown', e => { if (inputEnabled) keys[e.code] = true; });
   addEventListener('keyup', e => { keys[e.code] = false; });
 
   group.position.set(start.x, 0, start.z);
@@ -30,6 +35,18 @@ export function createCarController(
     position: group.position,
     get heading() { return heading; },
     get speed() { return speed; },
+
+    setInputEnabled(enabled) {
+      inputEnabled = enabled;
+      if (!enabled) for (const code in keys) keys[code] = false;
+    },
+
+    resetTo(next) {
+      group.position.set(next.x, 0, next.z);
+      heading = next.heading;
+      group.rotation.y = heading;
+      speed = 0;
+    },
 
     update(dt) {
       const up = keys.KeyW || keys.ArrowUp, down = keys.KeyS || keys.ArrowDown;

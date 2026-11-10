@@ -29,7 +29,6 @@ export interface StartPosition {
 
 export interface RoadNetwork {
   segments: StreetSegment[];
-  start: StartPosition;
   labels: StreetLabels;
 }
 
@@ -76,22 +75,27 @@ function flatMesh(positions: number[], material: THREE.Material): THREE.Mesh {
   return new THREE.Mesh(geometry, material);
 }
 
-// The car starts at the point on a drivable road closest to (0, 0), heading along the road.
-function findStart(segments: StreetSegment[]): StartPosition {
-  let start: StartPosition = { x: 0, z: 0, heading: 0 };
-  let closestToOrigin = Infinity;
-  for (const { ax, az, bx, bz, drivable } of segments) {
+export interface StartMatch extends StartPosition {
+  name: string | undefined;
+  distance: number;
+}
+
+/** The point on a drivable road closest to the target, heading along the road. */
+export function findStart(segments: StreetSegment[], target: { x: number; z: number }): StartMatch {
+  let best: StartMatch = { x: target.x, z: target.z, heading: 0, name: undefined, distance: 0 }; // no drivable road
+  let closest = Infinity;
+  for (const { ax, az, bx, bz, drivable, name } of segments) {
     if (!drivable) continue;
     const dx = bx - ax, dz = bz - az;
-    const t = THREE.MathUtils.clamp(-(ax * dx + az * dz) / (dx * dx + dz * dz), 0, 1);
+    const t = THREE.MathUtils.clamp(((target.x - ax) * dx + (target.z - az) * dz) / (dx * dx + dz * dz), 0, 1);
     const x = ax + t * dx, z = az + t * dz;
-    const distance = Math.hypot(x, z);
-    if (distance < closestToOrigin) {
-      closestToOrigin = distance;
-      start = { x, z, heading: Math.atan2(dx, dz) };
+    const distance = Math.hypot(x - target.x, z - target.z);
+    if (distance < closest) {
+      closest = distance;
+      best = { x, z, heading: Math.atan2(dx, dz), name, distance };
     }
   }
-  return start;
+  return best;
 }
 
 const isRoad = (feature: TownFeature): feature is RoadFeature =>
@@ -155,5 +159,5 @@ export function addRoads(scene: THREE.Scene, renderer: THREE.WebGLRenderer, town
   scene.add(centerLines);
   labels.setHeight(centerLines.position.y + ROAD_LAYER_GAP);
 
-  return { segments, start: findStart(segments), labels };
+  return { segments, labels };
 }
