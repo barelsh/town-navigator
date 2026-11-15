@@ -10,8 +10,13 @@ export interface TownSettings {
   startPoint: MapPoint;
 }
 
+export const DEFAULT_SPEED_LIMIT_KMH = 79;
+export const MIN_SPEED_LIMIT_KMH = 10;
+export const MAX_SPEED_LIMIT_KMH = 150; // faster could skip through walls on a 0.05 s frame
+
 export interface Settings {
   version: 1;
+  speedLimitKmh?: number;
   towns: Record<string, TownSettings | undefined>;
 }
 
@@ -29,6 +34,12 @@ export function loadSettings(): Settings {
     // unreadable or blocked: fall through to defaults
   }
   return { version: 1, towns: {} };
+}
+
+export function speedLimitOf(settings: Settings): number {
+  const kmh = settings.speedLimitKmh;
+  return Number.isInteger(kmh) && kmh! >= MIN_SPEED_LIMIT_KMH && kmh! <= MAX_SPEED_LIMIT_KMH
+    ? kmh! : DEFAULT_SPEED_LIMIT_KMH;
 }
 
 export function townSettings(settings: Settings, townId: string): TownSettings {

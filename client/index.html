@@ -68,6 +68,17 @@
           <button class="secondary" type="button" id="settings-reset">Reset to 0, 0</button>
         </div>
       </fieldset>
+      <fieldset>
+        <legend>Driving</legend>
+        <div class="limit-row">
+          <input type="range" id="settings-limit-slider" min="10" max="150" step="1" aria-label="Speed limit" aria-describedby="settings-limit-facts">
+          <label class="limit-box" for="settings-limit-input"><input id="settings-limit-input" inputmode="numeric" autocomplete="off" aria-describedby="settings-limit-error settings-limit-facts">km/h</label>
+        </div>
+        <div class="scale" aria-hidden="true"><span>10</span><span>79</span><span>150</span></div>
+        <p class="error" id="settings-limit-error" hidden></p>
+        <p class="facts" id="settings-limit-facts"></p>
+        <button class="link" type="button" id="settings-limit-reset">Reset to 79 km/h</button>
+      </fieldset>
       <p class="saved-note" id="settings-note" hidden></p>
       <div class="actions">
         <button class="secondary" type="button" id="settings-cancel">Cancel</button>

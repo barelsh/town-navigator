@@ -109,4 +109,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
 #settings-dialog button.primary { background: #ffd166; color: #141820; border-color: #ffd166; }
 #settings-dialog button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
 #settings-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+#settings-dialog .limit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+#settings-dialog input[type="range"] { padding: 0; border: 0; background: none; accent-color: #ffd166; }
+#settings-dialog .limit-box { display: flex; align-items: center; gap: 6px; }
+#settings-dialog .limit-box input { width: 64px; text-align: right; }
+#settings-dialog .scale { display: flex; justify-content: space-between; font-size: 11px; color: #a9b3bf; margin-top: -4px; font-variant-numeric: tabular-nums; }
+#settings-dialog .facts { font-size: 12px; color: #a9b3bf; margin: 0; }
+#settings-dialog .link { all: unset; cursor: pointer; color: #ffd166; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; justify-self: start; }
+#settings-dialog .link:focus-visible { outline: 2px solid #ffd166; outline-offset: 2px; }
 #settings-dialog .saved-note { color: #a9b3bf; font-size: 12px; margin: 0; }

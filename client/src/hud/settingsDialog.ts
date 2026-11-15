@@ -1,7 +1,10 @@
 import type { TownBounds } from '@town-navigator/shared';
 import { SETTINGS_SHORTCUT } from '../config.ts';
 import type { StartMatch } from '../town/roads.ts';
-import { toWorld, type MapPoint } from '../settings/settingsStore.ts';
+import { ACCEL, KMH_PER_MPS, REVERSE_SHARE } from '../car/carController.ts';
+import {
+  DEFAULT_SPEED_LIMIT_KMH, MAX_SPEED_LIMIT_KMH, MIN_SPEED_LIMIT_KMH, toWorld, type MapPoint,
+} from '../settings/settingsStore.ts';
 
 const MAX_DISTANCE = 50_000; // meters
 
@@ -15,16 +18,35 @@ function isTyping(target: EventTarget | null): boolean {
     || (target instanceof HTMLElement && target.isContentEditable);
 }
 
+function parseLimit(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return value >= MIN_SPEED_LIMIT_KMH && value <= MAX_SPEED_LIMIT_KMH ? value : null;
+}
+
+function limitFacts(kmh: number): string {
+  const reverse = Math.round(kmh * REVERSE_SHARE);
+  const seconds = (kmh / KMH_PER_MPS / ACCEL).toFixed(1);
+  return `Reverse up to ${reverse} km/h · 0 to ${kmh} in ${seconds} s`;
+}
+
 const round1 = (n: number) => String(Math.round(n * 10) / 10);
 
+/** What the dialog edits. */
+export interface DialogValues {
+  startPoint: MapPoint;
+  speedLimitKmh: number;
+}
+
 export interface SettingsDialogOptions {
-  initial(): MapPoint;
+  initial(): DialogValues;
   carPoint(): MapPoint;
   preview(point: MapPoint): StartMatch;
   bounds: TownBounds;
   onOpenChange(open: boolean): void;
-  /** Applies the point; returns false when it could not be stored. */
-  onSave(point: MapPoint): boolean;
+  /** Applies the values; returns false when they could not be stored. */
+  onSave(values: DialogValues): boolean;
 }
 
 export interface SettingsDialog {
@@ -41,6 +63,10 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
   const preview = $('settings-preview');
   const note = $('settings-note');
   const save = $<HTMLButtonElement>('settings-save');
+  const slider = $<HTMLInputElement>('settings-limit-slider');
+  const limitInput = $<HTMLInputElement>('settings-limit-input');
+  const limitError = $('settings-limit-error');
+  const limitFactsLine = $('settings-limit-facts');
 
   function read(): MapPoint | null {
     const x = parseMeters(east.value), y = parseMeters(north.value);
@@ -62,7 +88,16 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
     }
     error.hidden = !invalid;
     error.textContent = invalid ? 'Enter a distance in meters, like 120 or -35.5' : '';
-    save.disabled = invalid;
+    const limit = parseLimit(limitInput.value);
+    limitInput.setAttribute('aria-invalid', String(limit === null));
+    limitError.hidden = limit !== null;
+    limitError.textContent = limit === null
+      ? `Enter a whole number from ${MIN_SPEED_LIMIT_KMH} to ${MAX_SPEED_LIMIT_KMH}` : '';
+    if (limit !== null) {
+      slider.value = String(limit);
+      limitFactsLine.textContent = limitFacts(limit);
+    }
+    save.disabled = invalid || limit === null;
     preview.replaceChildren();
     if (!point) return;
 
@@ -88,9 +123,10 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
 
   function open(): void {
     if (dialog.open) return;
-    const point = options.initial();
+    const { startPoint: point, speedLimitKmh } = options.initial();
     east.value = round1(point.x);
     north.value = round1(point.y);
+    limitInput.value = slider.value = String(speedLimitKmh);
     note.hidden = true;
     refresh();
     options.onOpenChange(true);
@@ -106,7 +142,19 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
   });
 
   gear.addEventListener('click', open);
-  for (const input of [east, north]) input.addEventListener('input', refresh);
+  for (const input of [east, north, limitInput]) input.addEventListener('input', refresh);
+  slider.addEventListener('input', () => { limitInput.value = slider.value; refresh(); });
+  slider.addEventListener('keydown', e => {
+    if (e.code !== 'PageUp' && e.code !== 'PageDown') return;
+    e.preventDefault(); // the browser's own page step isn't 10
+    const next = Number(slider.value) + (e.code === 'PageUp' ? 10 : -10);
+    limitInput.value = slider.value = String(Math.min(MAX_SPEED_LIMIT_KMH, Math.max(MIN_SPEED_LIMIT_KMH, next)));
+    refresh();
+  });
+  $('settings-limit-reset').addEventListener('click', () => {
+    limitInput.value = String(DEFAULT_SPEED_LIMIT_KMH);
+    refresh();
+  });
 
   $('settings-use-car').addEventListener('click', () => {
     const p = options.carPoint();
@@ -125,13 +173,13 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
 
   dialog.addEventListener('submit', e => {
     e.preventDefault();
-    const point = read();
-    if (!point) return;
-    const stored = options.onSave(point);
+    const point = read(), speedLimitKmh = parseLimit(limitInput.value);
+    if (!point || speedLimitKmh === null) return;
+    const stored = options.onSave({ startPoint: point, speedLimitKmh });
     if (stored) {
       dialog.close();
     } else {
-      note.textContent = 'Couldn’t save in this browser. This start lasts until you reload.';
+      note.textContent = 'Couldn’t save in this browser. These settings last until you reload.';
       note.hidden = false;
     }
   });
