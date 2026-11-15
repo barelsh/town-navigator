@@ -43,7 +43,7 @@ function heightSource(properties: TownProperties): string {
 }
 
 // Shoelace formula. GeoJSON rings repeat their first point at the end.
-function ringArea(ring: Position[]): number {
+export function ringArea(ring: Position[]): number {
   let sum = 0;
   for (let i = 0; i < ring.length - 1; i++) {
     sum += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];

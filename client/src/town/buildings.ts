@@ -3,6 +3,7 @@ import type { Position } from 'geojson';
 import type { BuildingFeature, Town, TownFeature } from '@town-navigator/shared';
 import { createApartmentFacades, MIN_FACADE_FLOORS } from './apartmentFacade.ts';
 import { floorCount } from './facadeKit.ts';
+import { createHouseGeometry, houseMaterials, isSingleFloorHouse } from './houseModel.ts';
 import { createSchoolFacades } from './schoolFacade.ts';
 import { buildingGroup, buildingHeight, buildingIcon, GROUP_COLORS, ROOF_SHADE, UNKNOWN_SHADES } from './buildingStyles.ts';
 import type { Obstacle } from './collision.ts';
@@ -92,12 +93,19 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
   for (const feature of town.features.filter(isBuilding)) {
     const [outer, ...holes] = feature.geometry.coordinates;
     const height = buildingHeight(feature.properties);
-    const shape = new THREE.Shape(ringPoints(outer));
-    shape.holes = holes.map(hole => new THREE.Path(ringPoints(hole)));
+    const ring = outer.slice(0, -1).map(([x, y]): Point2 => [x, -y]);
+    const house = isSingleFloorHouse(feature);
+    let geometry: THREE.BufferGeometry;
+    if (house) {
+      geometry = createHouseGeometry(ring, height);
+    } else {
+      const shape = new THREE.Shape(ringPoints(outer));
+      shape.holes = holes.map(hole => new THREE.Path(ringPoints(hole)));
 
-    // Extrusion runs along +z; rotating it upright also maps y to -z.
-    const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
-    geometry.rotateX(-Math.PI / 2);
+      // Extrusion runs along +z; rotating it upright also maps y to -z.
+      geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+      geometry.rotateX(-Math.PI / 2);
+    }
 
     const group = buildingGroup(feature.properties);
     const shade = group === 'unknown' ? UNKNOWN_SHADES[Math.floor(rand() * UNKNOWN_SHADES.length)] : 1;
@@ -107,12 +115,11 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const hasFacade = feature.properties.building === 'apartments' && floors >= MIN_FACADE_FLOORS;
     const isSchool = feature.properties.building === 'school';
     const wallMaterial = isSchool ? schools.wallMaterial : hasFacade ? facades.wallMaterial : wall;
-    const mesh = new THREE.Mesh(geometry, [roof, wallMaterial]);
+    const mesh = new THREE.Mesh(geometry, house ? houseMaterials(String(feature.id ?? feature.properties['@id'] ?? '')) : [roof, wallMaterial]);
     mesh.castShadow = mesh.receiveShadow = true;
     scene.add(mesh);
     pickTargets.set(mesh, feature);
 
-    const ring = outer.slice(0, -1).map(([x, y]): Point2 => [x, -y]);
     const featureId = String(feature.id ?? feature.properties['@id'] ?? '');
     if (hasFacade) facades.add(featureId, ring, height, floors);
     if (isSchool) schools.add(featureId, ring, height, floors);
