@@ -2,6 +2,7 @@ import type { TownBounds } from '@town-navigator/shared';
 import { SETTINGS_SHORTCUT } from '../config.ts';
 import type { StartMatch } from '../town/roads.ts';
 import { DEFAULT_VEHICLE, VEHICLES } from '../car/vehicles.ts';
+import type { Appearance } from '../town/buildings.ts';
 import { createVehiclePreview } from './vehiclePreview.ts';
 import { ACCEL, KMH_PER_MPS, REVERSE_SHARE } from '../car/carController.ts';
 import {
@@ -40,6 +41,7 @@ export interface DialogValues {
   startPoint: MapPoint;
   speedLimitKmh: number;
   vehicle: string;
+  appearance: Appearance;
 }
 
 export interface SettingsDialogOptions {
@@ -73,6 +75,8 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
   const cars = $('settings-cars');
   const carsDetails = $<HTMLDetailsElement>('settings-cars-details');
   const carsSummary = $('settings-cars-summary');
+  const appearanceRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="settings-appearance"]')];
+  const chosenAppearance = (): Appearance => appearanceRadios.find(r => r.checked)?.value === 'plain' ? 'plain' : 'realistic';
   const carPreview = createVehiclePreview($('settings-car-preview'), $('settings-car-name'), $('settings-car-size'));
 
   cars.innerHTML = VEHICLES.map(v =>
@@ -144,7 +148,8 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
 
   function open(): void {
     if (dialog.open) return;
-    const { startPoint: point, speedLimitKmh, vehicle } = options.initial();
+    const { startPoint: point, speedLimitKmh, vehicle, appearance } = options.initial();
+    for (const radio of appearanceRadios) radio.checked = radio.value === appearance;
     for (const radio of radios) radio.checked = radio.value === vehicle;
     carsDetails.open = false; // the list is long, so it starts folded
     updateCarsSummary();
@@ -201,7 +206,7 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
     e.preventDefault();
     const point = read(), speedLimitKmh = parseLimit(limitInput.value);
     if (!point || speedLimitKmh === null) return;
-    const stored = options.onSave({ startPoint: point, speedLimitKmh, vehicle: chosenVehicle() });
+    const stored = options.onSave({ startPoint: point, speedLimitKmh, vehicle: chosenVehicle(), appearance: chosenAppearance() });
     if (stored) {
       dialog.close();
     } else {

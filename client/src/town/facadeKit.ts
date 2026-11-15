@@ -69,8 +69,8 @@ export function createPartStore<P extends string>(definitions: Record<P, PartDef
       parts[part].push(matrix.clone());
     },
 
-    /** Adds one instanced mesh per part type to the scene. */
-    finish(scene: THREE.Scene): FacadeStats {
+    /** Adds one instanced mesh per part type to the parent. */
+    finish(parent: THREE.Object3D): FacadeStats {
       const box = new THREE.BoxGeometry(1, 1, 1);
       let boxes = 0, calls = 0;
       for (const name of names) {
@@ -95,7 +95,7 @@ export function createPartStore<P extends string>(definitions: Record<P, PartDef
         mesh.frustumCulled = false; // each mesh spans the town
         mesh.castShadow = Boolean(def.shadow);
         mesh.receiveShadow = !def.opacity;
-        scene.add(mesh);
+        parent.add(mesh);
         boxes += list.length;
         calls++;
       }

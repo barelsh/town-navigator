@@ -73,10 +73,20 @@ const ringPoints = (ring: Position[]) => ring.slice(0, -1).map(([x, y]) => new T
 const isBuilding = (feature: TownFeature): feature is BuildingFeature =>
   Boolean(feature.properties.building) && feature.geometry.type === 'Polygon';
 
+export type Appearance = 'realistic' | 'plain';
+
+interface AppearanceSwap {
+  mesh: THREE.Mesh;
+  plain: { geometry: THREE.BufferGeometry; material: THREE.Material[] };
+  realistic: { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[] };
+}
+
 export interface Buildings {
   obstacles: Obstacle[];
   tallestBuilding: number;
   pickTargets: Map<THREE.Object3D, BuildingFeature>;
+  /** Switches every realistic model to flat colored blocks, or back, without rebuilding anything. */
+  setAppearance(appearance: Appearance): void;
 }
 
 export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
@@ -89,6 +99,9 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
   const pickTargets = new Map<THREE.Object3D, BuildingFeature>();
   const facades = createApartmentFacades();
   const schools = createSchoolFacades();
+  const realisticParts = new THREE.Group(); // every facade part, hidden as one in the plain view
+  scene.add(realisticParts);
+  const swaps: AppearanceSwap[] = [];
 
   for (const feature of town.features.filter(isBuilding)) {
     const [outer, ...holes] = feature.geometry.coordinates;
@@ -96,17 +109,13 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const ring = outer.slice(0, -1).map(([x, y]): Point2 => [x, -y]);
     const houseFloorCount = houseFloors(feature);
     const house = houseFloorCount !== null;
-    let geometry: THREE.BufferGeometry;
-    if (house) {
-      geometry = createHouseGeometry(ring, height, houseFloorCount);
-    } else {
-      const shape = new THREE.Shape(ringPoints(outer));
-      shape.holes = holes.map(hole => new THREE.Path(ringPoints(hole)));
+    const shape = new THREE.Shape(ringPoints(outer));
+    shape.holes = holes.map(hole => new THREE.Path(ringPoints(hole)));
 
-      // Extrusion runs along +z; rotating it upright also maps y to -z.
-      geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
-      geometry.rotateX(-Math.PI / 2);
-    }
+    // Extrusion runs along +z; rotating it upright also maps y to -z.
+    const plainGeometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    plainGeometry.rotateX(-Math.PI / 2);
+    const geometry = house ? createHouseGeometry(ring, height, houseFloorCount) : plainGeometry;
 
     const group = buildingGroup(feature.properties);
     const shade = group === 'unknown' ? UNKNOWN_SHADES[Math.floor(rand() * UNKNOWN_SHADES.length)] : 1;
@@ -116,10 +125,20 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const hasFacade = feature.properties.building === 'apartments' && floors >= MIN_FACADE_FLOORS;
     const isSchool = feature.properties.building === 'school';
     const wallMaterial = isSchool ? schools.wallMaterial : hasFacade ? facades.wallMaterial : wall;
-    const mesh = new THREE.Mesh(geometry, house ? houseMaterials(String(feature.id ?? feature.properties['@id'] ?? ''), houseFloorCount > 1 ? 'duplex' : 'house') : [roof, wallMaterial]);
+    const realisticMaterial = house
+      ? houseMaterials(String(feature.id ?? feature.properties['@id'] ?? ''), houseFloorCount > 1 ? 'duplex' : 'house')
+      : [roof, wallMaterial];
+    const mesh = new THREE.Mesh(geometry, realisticMaterial);
     mesh.castShadow = mesh.receiveShadow = true;
     scene.add(mesh);
     pickTargets.set(mesh, feature);
+    if (house) {
+      swaps.push({ mesh, plain: { geometry: plainGeometry, material: [roof, wall] }, realistic: { geometry, material: realisticMaterial } });
+    } else {
+      if (wallMaterial !== wall) {
+        swaps.push({ mesh, plain: { geometry: plainGeometry, material: [roof, wall] }, realistic: { geometry, material: realisticMaterial } });
+      }
+    }
 
     const featureId = String(feature.id ?? feature.properties['@id'] ?? '');
     if (hasFacade) facades.add(featureId, ring, height, floors);
@@ -138,8 +157,18 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
       pickTargets.set(sprite, feature);
     }
   }
-  facades.finish(scene);
-  schools.finish(scene);
+  facades.finish(realisticParts);
+  schools.finish(realisticParts);
 
-  return { obstacles, tallestBuilding, pickTargets };
+  function setAppearance(appearance: Appearance): void {
+    const realistic = appearance === 'realistic';
+    realisticParts.visible = realistic;
+    for (const { mesh, plain, realistic: model } of swaps) {
+      const choice = realistic ? model : plain;
+      mesh.geometry = choice.geometry;
+      mesh.material = choice.material;
+    }
+  }
+
+  return { obstacles, tallestBuilding, pickTargets, setAppearance };
 }

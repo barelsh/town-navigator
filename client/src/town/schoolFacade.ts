@@ -21,7 +21,7 @@ export interface SchoolFacades {
   /** Adds the parts for one school. `footprint` is its outer ring in world [x, z], without the repeated last point. */
   add(id: string, footprint: Point2[], height: number, floors: number): void;
   /** Adds one instanced mesh per part type to the scene. */
-  finish(scene: THREE.Scene): FacadeStats;
+  finish(parent: THREE.Object3D): FacadeStats;
 }
 
 export function createSchoolFacades(): SchoolFacades {

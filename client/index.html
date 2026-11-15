@@ -13,7 +13,7 @@
     W / ↑ accelerate · S / ↓ brake/reverse<br />
     A D / ← → steer · C switch camera<br />
     Click a building for details<br />
-    <kbd>P</kbd> settings<br />
+    <kbd>P</kbd> settings · <kbd>V</kbd> building view<br />
     Speed: <span id="speed">0</span> km/h
   </div>
 
@@ -66,6 +66,13 @@
         <div class="quick">
           <button class="secondary" type="button" id="settings-use-car">Use car position</button>
           <button class="secondary" type="button" id="settings-reset">Reset to 0, 0</button>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Buildings</legend>
+        <div class="choices" role="radiogroup" aria-label="Buildings">
+          <label class="choice"><input type="radio" name="settings-appearance" value="realistic"><span class="choice-card"><b>Realistic</b><span>Detailed facades on apartments and schools</span></span></label>
+          <label class="choice"><input type="radio" name="settings-appearance" value="plain"><span class="choice-card"><b>Plain</b><span>Flat colored blocks, lighter to draw</span></span></label>
         </div>
       </fieldset>
       <fieldset>

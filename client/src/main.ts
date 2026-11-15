@@ -5,7 +5,7 @@ import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
 import { chaseOffset } from './car/vehicles.ts';
-import { DEFAULT_TOWN } from './config.ts';
+import { APPEARANCE_SHORTCUT, DEFAULT_TOWN } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
@@ -16,7 +16,7 @@ import { buildingInfo } from './town/buildingInfo.ts';
 import { createBuildingPicker } from './town/buildingPicker.ts';
 import { addBuildings } from './town/buildings.ts';
 import { currentStreet, hitsVehicle, outsideDepth, vehicleOverlap } from './town/collision.ts';
-import { fromWorld, loadSettings, saveSettings, speedLimitOf, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
+import { fromWorld, loadSettings, saveSettings, speedLimitOf, appearanceOf, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
 import { addRoads, findStart } from './town/roads.ts';
 
 const MAX_FRAME_TIME = 0.05; // seconds
@@ -32,9 +32,11 @@ async function main(): Promise<void> {
 
     addGround(scene, town.bbox);
     const roads = addRoads(scene, renderer, town);
-    const { obstacles, tallestBuilding, pickTargets } = addBuildings(scene, town);
+    const { obstacles, tallestBuilding, pickTargets, setAppearance } = addBuildings(scene, town);
 
     const settings = loadSettings();
+    let appearance = appearanceOf(settings);
+    setAppearance(appearance); // before the first frame
     const carModel = createCarModel(vehicleOf(settings));
     scene.add(carModel.group);
     const target = toWorld(townSettings(settings, DEFAULT_TOWN).startPoint);
@@ -66,6 +68,7 @@ async function main(): Promise<void> {
           startPoint: townSettings(stored, DEFAULT_TOWN).startPoint,
           speedLimitKmh: speedLimitOf(stored),
           vehicle: vehicleOf(stored),
+          appearance: appearanceOf(stored),
         };
       },
       carPoint: () => fromWorld(car.position),
@@ -75,12 +78,15 @@ async function main(): Promise<void> {
         car.setInputEnabled(!open);
         followCamera.setInputEnabled(!open);
       },
-      onSave: ({ startPoint, speedLimitKmh, vehicle }) => {
+      onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance }) => {
         const latest = loadSettings();
         const previous = townSettings(latest, DEFAULT_TOWN).startPoint;
         latest.towns[DEFAULT_TOWN] = { startPoint };
         latest.speedLimitKmh = speedLimitKmh;
         latest.vehicle = vehicle;
+        latest.appearance = newAppearance;
+        appearance = newAppearance;
+        setAppearance(newAppearance);
         car.setSpeedLimit(speedLimitKmh);
         // Only a new starting point moves the car; a new limit alone must not interrupt driving.
         if (startPoint.x !== previous.x || startPoint.y !== previous.y) {
@@ -101,6 +107,13 @@ async function main(): Promise<void> {
     });
 
     addEventListener('keydown', e => {
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if (e.code === APPEARANCE_SHORTCUT && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !typing && !settingsDialog.isOpen) {
+        // Flips the saved building view; the dialog's Buildings choice stays the way to pick one explicitly.
+        appearance = appearance === 'plain' ? 'realistic' : 'plain';
+        setAppearance(appearance);
+        saveSettings({ ...loadSettings(), appearance });
+      }
       if (e.code === 'Escape' && !settingsDialog.isOpen) tooltip.close();
     });
 

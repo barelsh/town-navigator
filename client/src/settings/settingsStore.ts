@@ -1,4 +1,5 @@
 import { SETTINGS_STORAGE_KEY } from '../config.ts';
+import type { Appearance } from '../town/buildings.ts';
 import { DEFAULT_VEHICLE, vehicleById } from '../car/vehicles.ts';
 
 /** A point on the map in meters from the town's center: x east, y north. */
@@ -19,6 +20,7 @@ export interface Settings {
   version: 1;
   speedLimitKmh?: number;
   vehicle?: string;
+  appearance?: Appearance;
   towns: Record<string, TownSettings | undefined>;
 }
 
@@ -47,6 +49,11 @@ export function speedLimitOf(settings: Settings): number {
 /** The saved vehicle id; unknown or missing ids give the default. */
 export function vehicleOf(settings: Settings): string {
   return vehicleById(settings.vehicle ?? DEFAULT_VEHICLE).id;
+}
+
+/** The saved building view; unknown or missing values give Realistic. */
+export function appearanceOf(settings: Settings): Appearance {
+  return settings.appearance === 'plain' ? 'plain' : 'realistic';
 }
 
 export function townSettings(settings: Settings, townId: string): TownSettings {

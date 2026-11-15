@@ -30,7 +30,7 @@ export interface ApartmentFacades {
   /** Adds facade parts for one building. `footprint` is its outer ring in world [x, z], without the repeated last point. */
   add(id: string, footprint: Point2[], height: number, floors: number): void;
   /** Adds one instanced mesh per part type to the scene. */
-  finish(scene: THREE.Scene): FacadeStats;
+  finish(parent: THREE.Object3D): FacadeStats;
 }
 
 // Symmetric from both ends, like the photo. The same plan repeats on every floor.
