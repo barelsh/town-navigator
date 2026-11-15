@@ -125,6 +125,21 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
 #settings-dialog .cars b { font-weight: 600; overflow-wrap: anywhere; }
 #settings-dialog .cars small { color: #a9b3bf; font-size: 11px; grid-column: 2; }
 #settings-dialog .cars .default { color: #ffd166; }
+#perf { position: fixed; left: 12px; bottom: 12px; z-index: 5; display: grid; grid-template-columns: repeat(4, 140px); gap: 4px; }
+#perf[hidden], #perf-tip[hidden] { display: none; }
+.perf-cell { position: relative; width: 140px; height: 84px; border-radius: 4px; overflow: hidden; opacity: 0.9; cursor: help; }
+.perf-cell canvas { display: block; width: 100% !important; height: 100% !important; } /* the panel sets its own 80 × 48 size inline */
+.perf-cell:hover, .perf-cell.over { opacity: 1; }
+.perf-cell.over { box-shadow: inset 0 0 0 2px #ff4d4d; }
+.perf-limit { position: absolute; left: 3px; right: 3px; height: 1px; background: #ff4d4d; pointer-events: none; }
+#perf-tip {
+  position: fixed; z-index: 6; width: 220px; padding: 7px 10px; background: #141820; color: #fff; border-radius: 6px;
+  font-size: 12px; line-height: 1.45; box-shadow: 0 4px 12px rgba(10, 14, 20, 0.35); pointer-events: none;
+}
+#perf-tip b { display: block; color: #ffd166; }
+#perf-tip .lim { display: block; margin-top: 4px; color: #ff9c8a; }
+#settings-dialog label.check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #fff; cursor: pointer; }
+#settings-dialog input[type="checkbox"] { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: #ffd166; }
 #settings-dialog .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 #settings-dialog .choice { position: relative; display: block; }
 #settings-dialog .choice input { position: absolute; opacity: 0; inset: 0; margin: 0; width: 100%; height: 100%; padding: 0; border: 0; cursor: pointer; }

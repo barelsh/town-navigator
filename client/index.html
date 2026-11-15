@@ -14,6 +14,7 @@
     A D / ← → steer · C switch camera<br />
     Click a building for details<br />
     <kbd>P</kbd> settings · <kbd>V</kbd> building view<br />
+    <kbd>M</kbd> performance panel<br />
     Speed: <span id="speed">0</span> km/h
   </div>
 
@@ -67,6 +68,11 @@
           <button class="secondary" type="button" id="settings-use-car">Use car position</button>
           <button class="secondary" type="button" id="settings-reset">Reset to 0, 0</button>
         </div>
+      </fieldset>
+      <fieldset>
+        <legend>Monitoring</legend>
+        <label class="check" for="settings-monitoring"><input type="checkbox" id="settings-monitoring" aria-keyshortcuts="M"> Show performance panel</label>
+        <p class="hint">Frame rate, frame time, memory (Chrome only), draw calls, triangles, and loaded geometries and textures. Shortcut <kbd>M</kbd>.</p>
       </fieldset>
       <fieldset>
         <legend>Buildings</legend>

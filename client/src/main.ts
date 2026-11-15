@@ -5,18 +5,19 @@ import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
 import { chaseOffset } from './car/vehicles.ts';
-import { APPEARANCE_SHORTCUT, DEFAULT_TOWN } from './config.ts';
+import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
-import { createSettingsDialog } from './hud/settingsDialog.ts';
+import { createPerfMonitor } from './hud/perfMonitor.ts';
+import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
 import { createStreetReadout } from './hud/streetReadout.ts';
 import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
 import { createBuildingPicker } from './town/buildingPicker.ts';
 import { addBuildings } from './town/buildings.ts';
 import { currentStreet, hitsVehicle, outsideDepth, vehicleOverlap } from './town/collision.ts';
-import { fromWorld, loadSettings, saveSettings, speedLimitOf, appearanceOf, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
+import { fromWorld, loadSettings, saveSettings, speedLimitOf, appearanceOf, monitoringEnabled, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
 import { addRoads, findStart } from './town/roads.ts';
 
 const MAX_FRAME_TIME = 0.05; // seconds
@@ -35,6 +36,8 @@ async function main(): Promise<void> {
     const { obstacles, tallestBuilding, pickTargets, setAppearance } = addBuildings(scene, town);
 
     const settings = loadSettings();
+    const perf = createPerfMonitor(renderer);
+    perf.setVisible(monitoringEnabled(settings));
     let appearance = appearanceOf(settings);
     setAppearance(appearance); // before the first frame
     const carModel = createCarModel(vehicleOf(settings));
@@ -69,6 +72,7 @@ async function main(): Promise<void> {
           speedLimitKmh: speedLimitOf(stored),
           vehicle: vehicleOf(stored),
           appearance: appearanceOf(stored),
+          monitoring: perf.visible, // the panel itself is the truth, also when storage is blocked
         };
       },
       carPoint: () => fromWorld(car.position),
@@ -78,13 +82,15 @@ async function main(): Promise<void> {
         car.setInputEnabled(!open);
         followCamera.setInputEnabled(!open);
       },
-      onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance }) => {
+      onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring }) => {
         const latest = loadSettings();
         const previous = townSettings(latest, DEFAULT_TOWN).startPoint;
         latest.towns[DEFAULT_TOWN] = { startPoint };
         latest.speedLimitKmh = speedLimitKmh;
         latest.vehicle = vehicle;
         latest.appearance = newAppearance;
+        latest.monitoring = monitoring;
+        perf.setVisible(monitoring);
         appearance = newAppearance;
         setAppearance(newAppearance);
         car.setSpeedLimit(speedLimitKmh);
@@ -107,8 +113,17 @@ async function main(): Promise<void> {
     });
 
     addEventListener('keydown', e => {
-      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
-      if (e.code === APPEARANCE_SHORTCUT && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !typing && !settingsDialog.isOpen) {
+      const plainKey = !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(e.target);
+      if (e.code === MONITORING_SHORTCUT && plainKey) {
+        if (settingsDialog.isOpen) {
+          settingsDialog.toggleMonitoring(); // applies on Save, like the other fields
+        } else {
+          const show = !perf.visible;
+          perf.setVisible(show);
+          saveSettings({ ...loadSettings(), monitoring: show }); // if storage fails the panel still toggles
+        }
+      }
+      if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen) {
         // Flips the saved building view; the dialog's Buildings choice stays the way to pick one explicitly.
         appearance = appearance === 'plain' ? 'realistic' : 'plain';
         setAppearance(appearance);
@@ -118,6 +133,7 @@ async function main(): Promise<void> {
     });
 
     function tick(dt: number): void {
+      perf.begin();
       car.update(dt);
       stage.moveSunTo(car.position);
       speedDisplay.update(car.speed);
@@ -127,6 +143,7 @@ async function main(): Promise<void> {
       roads.labels.update(car.heading);
       renderer.render(scene, camera);
       tooltip.update(camera); // after render, which refreshes the camera matrices
+      perf.end();
     }
 
     const clock = new THREE.Clock();

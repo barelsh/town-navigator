@@ -21,6 +21,7 @@ export interface Settings {
   speedLimitKmh?: number;
   vehicle?: string;
   appearance?: Appearance;
+  monitoring?: boolean;
   towns: Record<string, TownSettings | undefined>;
 }
 
@@ -54,6 +55,11 @@ export function vehicleOf(settings: Settings): string {
 /** The saved building view; unknown or missing values give Realistic. */
 export function appearanceOf(settings: Settings): Appearance {
   return settings.appearance === 'plain' ? 'plain' : 'realistic';
+}
+
+/** Whether the performance panel is saved as on; missing means off. */
+export function monitoringEnabled(settings: Settings): boolean {
+  return settings.monitoring === true;
 }
 
 export function townSettings(settings: Settings, townId: string): TownSettings {
