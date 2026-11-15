@@ -79,6 +79,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
 #settings-dialog {
   width: min(360px, calc(100vw - 32px)); box-sizing: border-box; padding: 16px 18px 18px; border: 0; border-radius: 10px;
   background: #141820; color: #fff; font-size: 13px; line-height: 1.5; box-shadow: 0 12px 32px rgba(10, 14, 20, 0.45);
+  max-height: calc(100vh - 32px); overflow-y: auto;
 }
 #settings-dialog::backdrop { background: rgba(10, 12, 16, 0.4); }
 #settings-form { display: grid; gap: 14px; }
@@ -109,6 +110,21 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
 #settings-dialog button.primary { background: #ffd166; color: #141820; border-color: #ffd166; }
 #settings-dialog button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
 #settings-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+#settings-dialog .car-preview { height: 120px; border-radius: 6px; background: #1d222c; position: relative; overflow: hidden; }
+#settings-dialog .car-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#settings-dialog .car-preview .name { position: absolute; left: 10px; bottom: 6px; font-weight: 600; font-size: 13px; z-index: 1; }
+#settings-dialog .car-preview .size { position: absolute; right: 10px; bottom: 6px; font: 11px ui-monospace, Menlo, monospace; color: #a9b3bf; font-variant-numeric: tabular-nums; z-index: 1; }
+#settings-dialog .cars-details { display: grid; gap: 8px; }
+#settings-dialog .cars-details > summary { cursor: pointer; font-size: 13px; color: #ffd166; padding: 4px 0; list-style-position: inside; }
+#settings-dialog .cars-details > summary:focus-visible { outline: 2px solid #ffd166; outline-offset: 2px; }
+#settings-dialog .cars-details[open] > summary { margin-bottom: 8px; }
+#settings-dialog .cars { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#settings-dialog .cars label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; padding: 6px 8px; border: 1px solid #333b47; border-radius: 6px; cursor: pointer; min-width: 0; font-size: 13px; color: #fff; }
+#settings-dialog .cars label:has(input:checked) { border-color: #ffd166; background: #1d222c; }
+#settings-dialog .cars input { accent-color: #ffd166; margin: 0; grid-row: span 2; width: auto; padding: 0; border: 0; background: none; }
+#settings-dialog .cars b { font-weight: 600; overflow-wrap: anywhere; }
+#settings-dialog .cars small { color: #a9b3bf; font-size: 11px; grid-column: 2; }
+#settings-dialog .cars .default { color: #ffd166; }
 #settings-dialog .limit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 #settings-dialog input[type="range"] { padding: 0; border: 0; background: none; accent-color: #ffd166; }
 #settings-dialog .limit-box { display: flex; align-items: center; gap: 6px; }

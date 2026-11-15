@@ -1,6 +1,8 @@
 import type { TownBounds } from '@town-navigator/shared';
 import { SETTINGS_SHORTCUT } from '../config.ts';
 import type { StartMatch } from '../town/roads.ts';
+import { DEFAULT_VEHICLE, VEHICLES } from '../car/vehicles.ts';
+import { createVehiclePreview } from './vehiclePreview.ts';
 import { ACCEL, KMH_PER_MPS, REVERSE_SHARE } from '../car/carController.ts';
 import {
   DEFAULT_SPEED_LIMIT_KMH, MAX_SPEED_LIMIT_KMH, MIN_SPEED_LIMIT_KMH, toWorld, type MapPoint,
@@ -37,6 +39,7 @@ const round1 = (n: number) => String(Math.round(n * 10) / 10);
 export interface DialogValues {
   startPoint: MapPoint;
   speedLimitKmh: number;
+  vehicle: string;
 }
 
 export interface SettingsDialogOptions {
@@ -67,6 +70,24 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
   const limitInput = $<HTMLInputElement>('settings-limit-input');
   const limitError = $('settings-limit-error');
   const limitFactsLine = $('settings-limit-facts');
+  const cars = $('settings-cars');
+  const carsDetails = $<HTMLDetailsElement>('settings-cars-details');
+  const carsSummary = $('settings-cars-summary');
+  const carPreview = createVehiclePreview($('settings-car-preview'), $('settings-car-name'), $('settings-car-size'));
+
+  cars.innerHTML = VEHICLES.map(v =>
+    `<label><input type="radio" name="settings-car" value="${v.id}"><b>${v.name}</b>` +
+    `<small>${v.id === DEFAULT_VEHICLE ? '<span class="default">Default · </span>' : ''}${v.blurb}</small></label>`).join('');
+  const radios = [...cars.querySelectorAll<HTMLInputElement>('input')];
+  const chosenVehicle = () => radios.find(radio => radio.checked)?.value ?? DEFAULT_VEHICLE;
+  const updateCarsSummary = () => {
+    const spec = VEHICLES.find(v => v.id === chosenVehicle());
+    carsSummary.textContent = `All cars (${VEHICLES.length}) · ${spec?.name ?? ''}`;
+  };
+  cars.addEventListener('change', () => {
+    carPreview.show(chosenVehicle());
+    updateCarsSummary();
+  });
 
   function read(): MapPoint | null {
     const x = parseMeters(east.value), y = parseMeters(north.value);
@@ -123,7 +144,10 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
 
   function open(): void {
     if (dialog.open) return;
-    const { startPoint: point, speedLimitKmh } = options.initial();
+    const { startPoint: point, speedLimitKmh, vehicle } = options.initial();
+    for (const radio of radios) radio.checked = radio.value === vehicle;
+    carsDetails.open = false; // the list is long, so it starts folded
+    updateCarsSummary();
     east.value = round1(point.x);
     north.value = round1(point.y);
     limitInput.value = slider.value = String(speedLimitKmh);
@@ -131,12 +155,14 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
     refresh();
     options.onOpenChange(true);
     dialog.showModal();
+    carPreview.start(vehicle);
     east.focus();
     east.select();
   }
 
   // Esc fires `cancel` and closing by any route fires `close`; both end up here.
   dialog.addEventListener('close', () => {
+    carPreview.stop();
     options.onOpenChange(false);
     gear.focus();
   });
@@ -175,7 +201,7 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
     e.preventDefault();
     const point = read(), speedLimitKmh = parseLimit(limitInput.value);
     if (!point || speedLimitKmh === null) return;
-    const stored = options.onSave({ startPoint: point, speedLimitKmh });
+    const stored = options.onSave({ startPoint: point, speedLimitKmh, vehicle: chosenVehicle() });
     if (stored) {
       dialog.close();
     } else {

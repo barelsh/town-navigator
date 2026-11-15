@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const PIVOT_HEIGHT = 1.6;      // meters above the car: the camera slides toward this point
+const DEFAULT_PIVOT_HEIGHT = 1.6; // meters above the car: the camera slides toward this point
 const WALL_CLEARANCE = 0.7;    // meters kept in front of a wall; covers the 0.5 m near plane
 const SIDE_RAY_OFFSET = 0.6;   // meters to each side, for walls beside the line
 const RETURN_SPEED = 4;        // meters per second back out to the usual distance
@@ -8,6 +8,8 @@ const RETURN_SPEED = 4;        // meters per second back out to the usual distan
 export interface CameraCollision {
   /** Moves the camera toward the car when a building is in the way. */
   apply(camera: THREE.Camera, carPosition: THREE.Vector3, dt: number): void;
+  /** Sets how far above the car the camera slides toward; the vehicle's height plus 0.15 m keeps it above a roof. */
+  setPivotHeight(height: number): void;
   /** Forgets any pull-in, e.g. while in top-down view. */
   reset(): void;
 }
@@ -17,10 +19,11 @@ export function createCameraCollision(occluders: THREE.Object3D[]): CameraCollis
   const pivot = new THREE.Vector3(), direction = new THREE.Vector3();
   const side = new THREE.Vector3(), origin = new THREE.Vector3();
   let reach = Infinity;
+  let pivotHeight = DEFAULT_PIVOT_HEIGHT;
 
   return {
     apply(camera, carPosition, dt) {
-      pivot.copy(carPosition).setY(carPosition.y + PIVOT_HEIGHT);
+      pivot.copy(carPosition).setY(carPosition.y + pivotHeight);
       direction.subVectors(camera.position, pivot);
       const length = direction.length();
       if (length < 1e-3) return;
@@ -40,6 +43,9 @@ export function createCameraCollision(occluders: THREE.Object3D[]): CameraCollis
       // In at once, out gradually.
       reach = clear < reach ? clear : Math.min(clear, reach + RETURN_SPEED * dt);
       if (length > reach) camera.position.copy(pivot).addScaledVector(direction, reach);
+    },
+    setPivotHeight(height) {
+      pivotHeight = height;
     },
     reset() {
       reach = Infinity;

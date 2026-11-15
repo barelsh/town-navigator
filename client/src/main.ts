@@ -4,6 +4,7 @@ import { fetchTown } from './api/townApi.ts';
 import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
+import { chaseOffset } from './car/vehicles.ts';
 import { DEFAULT_TOWN } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
@@ -14,8 +15,8 @@ import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
 import { createBuildingPicker } from './town/buildingPicker.ts';
 import { addBuildings } from './town/buildings.ts';
-import { currentStreet, hitsBuilding, outsideTown } from './town/collision.ts';
-import { fromWorld, loadSettings, saveSettings, speedLimitOf, toWorld, townSettings } from './settings/settingsStore.ts';
+import { currentStreet, hitsVehicle, outsideDepth, vehicleOverlap } from './town/collision.ts';
+import { fromWorld, loadSettings, saveSettings, speedLimitOf, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
 import { addRoads, findStart } from './town/roads.ts';
 
 const MAX_FRAME_TIME = 0.05; // seconds
@@ -33,17 +34,19 @@ async function main(): Promise<void> {
     const roads = addRoads(scene, renderer, town);
     const { obstacles, tallestBuilding, pickTargets } = addBuildings(scene, town);
 
-    const carModel = createCarModel();
-    scene.add(carModel.group);
     const settings = loadSettings();
+    const carModel = createCarModel(vehicleOf(settings));
+    scene.add(carModel.group);
     const target = toWorld(townSettings(settings, DEFAULT_TOWN).startPoint);
-    const car = createCarController(carModel, findStart(roads.segments, target), (x, z) =>
-      hitsBuilding(obstacles, x, z) || outsideTown(town.bbox, x, z));
+    const car = createCarController(carModel, findStart(roads.segments, target), (x, z, heading) =>
+      Math.max(vehicleOverlap(obstacles, x, z, heading, carModel.collision), outsideDepth(town.bbox, x, z)));
 
     car.setSpeedLimit(speedLimitOf(settings)); // before the first frame
 
     const occluders = [...pickTargets.keys()].filter(object => object instanceof THREE.Mesh);
     const followCamera = createFollowCamera(camera, car.position, tallestBuilding, occluders);
+    followCamera.setChaseOffset(chaseOffset(carModel.spec));
+    followCamera.jumpTo(car.position, car.heading);
     const speedDisplay = createSpeedDisplay();
     const compass = createCompass();
     const streetReadout = createStreetReadout((x, z) => currentStreet(roads.segments, x, z));
@@ -59,7 +62,11 @@ async function main(): Promise<void> {
     const settingsDialog = createSettingsDialog({
       initial: () => {
         const stored = loadSettings();
-        return { startPoint: townSettings(stored, DEFAULT_TOWN).startPoint, speedLimitKmh: speedLimitOf(stored) };
+        return {
+          startPoint: townSettings(stored, DEFAULT_TOWN).startPoint,
+          speedLimitKmh: speedLimitOf(stored),
+          vehicle: vehicleOf(stored),
+        };
       },
       carPoint: () => fromWorld(car.position),
       preview: point => findStart(roads.segments, toWorld(point)),
@@ -68,16 +75,26 @@ async function main(): Promise<void> {
         car.setInputEnabled(!open);
         followCamera.setInputEnabled(!open);
       },
-      onSave: ({ startPoint, speedLimitKmh }) => {
+      onSave: ({ startPoint, speedLimitKmh, vehicle }) => {
         const latest = loadSettings();
         const previous = townSettings(latest, DEFAULT_TOWN).startPoint;
         latest.towns[DEFAULT_TOWN] = { startPoint };
         latest.speedLimitKmh = speedLimitKmh;
+        latest.vehicle = vehicle;
         car.setSpeedLimit(speedLimitKmh);
         // Only a new starting point moves the car; a new limit alone must not interrupt driving.
         if (startPoint.x !== previous.x || startPoint.y !== previous.y) {
           car.resetTo(findStart(roads.segments, toWorld(startPoint)));
           followCamera.jumpTo(car.position, car.heading);
+        }
+        if (vehicle !== carModel.spec.id) {
+          carModel.setVehicle(vehicle);
+          followCamera.setChaseOffset(chaseOffset(carModel.spec));
+          // A bigger vehicle may not fit where the car stands: move it to the nearest road and stop there.
+          if (hitsVehicle(obstacles, car.position.x, car.position.z, car.heading, carModel.collision)) {
+            car.resetTo(findStart(roads.segments, { x: car.position.x, z: car.position.z }));
+            followCamera.jumpTo(car.position, car.heading);
+          }
         }
         return saveSettings(latest); // false shows the "Couldn't save" note
       },

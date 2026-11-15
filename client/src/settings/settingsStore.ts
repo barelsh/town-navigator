@@ -1,4 +1,5 @@
 import { SETTINGS_STORAGE_KEY } from '../config.ts';
+import { DEFAULT_VEHICLE, vehicleById } from '../car/vehicles.ts';
 
 /** A point on the map in meters from the town's center: x east, y north. */
 export interface MapPoint {
@@ -17,6 +18,7 @@ export const MAX_SPEED_LIMIT_KMH = 150; // faster could skip through walls on a 
 export interface Settings {
   version: 1;
   speedLimitKmh?: number;
+  vehicle?: string;
   towns: Record<string, TownSettings | undefined>;
 }
 
@@ -40,6 +42,11 @@ export function speedLimitOf(settings: Settings): number {
   const kmh = settings.speedLimitKmh;
   return Number.isInteger(kmh) && kmh! >= MIN_SPEED_LIMIT_KMH && kmh! <= MAX_SPEED_LIMIT_KMH
     ? kmh! : DEFAULT_SPEED_LIMIT_KMH;
+}
+
+/** The saved vehicle id; unknown or missing ids give the default. */
+export function vehicleOf(settings: Settings): string {
+  return vehicleById(settings.vehicle ?? DEFAULT_VEHICLE).id;
 }
 
 export function townSettings(settings: Settings, townId: string): TownSettings {

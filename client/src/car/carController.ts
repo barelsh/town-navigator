@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import type { StartPosition } from '../town/roads.ts';
-import { WHEEL_RADIUS, type CarModel } from './carModel.ts';
-
 import { DEFAULT_SPEED_LIMIT_KMH } from '../settings/settingsStore.ts';
+import type { CarModel } from './carModel.ts';
 
 export const ACCEL = 14, BRAKE = 24, FRICTION = 6; // m/s²
 export const REVERSE_SHARE = 0.4; // reverse limit as a share of the speed limit
@@ -22,10 +21,12 @@ export interface CarController {
 }
 
 export function createCarController(
-  { group, wheels }: CarModel,
+  model: CarModel,
   start: StartPosition,
-  isBlocked: (x: number, z: number) => boolean
+  /** How far into a building or past the town's edge the vehicle would be at this pose, in meters; 0 when clear. */
+  overlap: (x: number, z: number, heading: number) => number
 ): CarController {
+  const { group } = model;
   const keys: Record<string, boolean> = {};
   let inputEnabled = true;
   addEventListener('keydown', e => { if (inputEnabled) keys[e.code] = true; });
@@ -77,6 +78,7 @@ export function createCarController(
       }
 
       const steer = (left ? 1 : 0) - (right ? 1 : 0);
+      const previousHeading = heading;
       heading += steer * dt * 2.2 * THREE.MathUtils.clamp(speed / 8, -1, 1);
 
       forward.set(Math.sin(heading), 0, Math.cos(heading));
@@ -84,12 +86,18 @@ export function createCarController(
       group.position.addScaledVector(forward, speed * dt);
       group.rotation.y = heading;
 
-      if (isBlocked(group.position.x, group.position.z)) {
+      // Compare whole poses, so turning into a wall counts as much as driving into it. A pose may overlap
+      // only if it is no deeper than the one before, which lets a car that overlaps (after a vehicle swap)
+      // drive out, and never lets it drive further in.
+      const now = overlap(group.position.x, group.position.z, heading);
+      if (now > 0 && now > overlap(previous.x, previous.z, previousHeading) + 1e-4) {
         group.position.copy(previous);
+        heading = previousHeading;
+        group.rotation.y = heading;
         speed *= -0.3;
       }
 
-      for (const wheel of wheels) wheel.rotation.x += speed * dt / WHEEL_RADIUS;
+      for (const wheel of model.wheels) wheel.rotation.x += speed * dt / model.spec.wheelRadius;
     },
   };
 }

@@ -1,16 +1,17 @@
 import * as THREE from 'three';
+import type { ChaseOffset } from '../car/vehicles.ts';
 import { createCameraCollision } from './cameraCollision.ts';
 
 const CHASE = 0, TOP_DOWN = 1;
 const CAMERA_MODES = 2;
 const TOP_DOWN_CLEARANCE = 30; // meters above the tallest building
-const CHASE_DISTANCE = 10;     // meters behind the car
-const CHASE_HEIGHT = 5;        // meters above the car
 
 export interface FollowCamera {
   update(dt: number, carPosition: THREE.Vector3, heading: number): void;
   /** Turns the camera-switch key on or off. */
   setInputEnabled(enabled: boolean): void;
+  /** Sets how far behind and above the car the chase camera sits, for the current vehicle. */
+  setChaseOffset(offset: ChaseOffset): void;
   /** Snaps to the car instead of gliding there. */
   jumpTo(carPosition: THREE.Vector3, heading: number): void;
 }
@@ -24,6 +25,7 @@ export function createFollowCamera(
   const collision = createCameraCollision(occluders);
   let mode = CHASE;
   let inputEnabled = true;
+  let chase: ChaseOffset = { distance: 10, height: 5, pivotHeight: 1.6 }; // for a 4.5 m, 1.45 m car
   addEventListener('keydown', e => {
     if (inputEnabled && e.code === 'KeyC') mode = (mode + 1) % CAMERA_MODES;
   });
@@ -35,6 +37,10 @@ export function createFollowCamera(
     setInputEnabled(enabled) {
       inputEnabled = enabled;
     },
+    setChaseOffset(offset) {
+      chase = offset;
+      collision.setPivotHeight(offset.pivotHeight);
+    },
     jumpTo(carPosition, heading) {
       target.copy(carPosition).setY(1);
       if (mode === TOP_DOWN) {
@@ -42,8 +48,8 @@ export function createFollowCamera(
         camera.up.set(Math.sin(heading), 0, Math.cos(heading));
       } else {
         camera.position.set(
-          carPosition.x - Math.sin(heading) * CHASE_DISTANCE, carPosition.y + CHASE_HEIGHT,
-          carPosition.z - Math.cos(heading) * CHASE_DISTANCE);
+          carPosition.x - Math.sin(heading) * chase.distance, carPosition.y + chase.height,
+          carPosition.z - Math.cos(heading) * chase.distance);
         camera.up.set(0, 1, 0);
       }
       camera.lookAt(target);
@@ -52,7 +58,7 @@ export function createFollowCamera(
     update(dt, carPosition, heading) {
       const offset = mode === TOP_DOWN
         ? new THREE.Vector3(0, tallestBuilding + TOP_DOWN_CLEARANCE, 0)
-        : new THREE.Vector3(-Math.sin(heading) * CHASE_DISTANCE, CHASE_HEIGHT, -Math.cos(heading) * CHASE_DISTANCE);
+        : new THREE.Vector3(-Math.sin(heading) * chase.distance, chase.height, -Math.cos(heading) * chase.distance);
       // Top-down, screen up follows the car, so the map turns around it.
       const up = mode === TOP_DOWN
         ? new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
