@@ -3,7 +3,7 @@ import type { Position } from 'geojson';
 import type { BuildingFeature, Town, TownFeature } from '@town-navigator/shared';
 import { createApartmentFacades, MIN_FACADE_FLOORS } from './apartmentFacade.ts';
 import { floorCount } from './facadeKit.ts';
-import { createHouseGeometry, houseMaterials, isSingleFloorHouse } from './houseModel.ts';
+import { createHouseGeometry, houseMaterials, houseFloors } from './houseModel.ts';
 import { createSchoolFacades } from './schoolFacade.ts';
 import { buildingGroup, buildingHeight, buildingIcon, GROUP_COLORS, ROOF_SHADE, UNKNOWN_SHADES } from './buildingStyles.ts';
 import type { Obstacle } from './collision.ts';
@@ -94,10 +94,11 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const [outer, ...holes] = feature.geometry.coordinates;
     const height = buildingHeight(feature.properties);
     const ring = outer.slice(0, -1).map(([x, y]): Point2 => [x, -y]);
-    const house = isSingleFloorHouse(feature);
+    const houseFloorCount = houseFloors(feature);
+    const house = houseFloorCount !== null;
     let geometry: THREE.BufferGeometry;
     if (house) {
-      geometry = createHouseGeometry(ring, height);
+      geometry = createHouseGeometry(ring, height, houseFloorCount);
     } else {
       const shape = new THREE.Shape(ringPoints(outer));
       shape.holes = holes.map(hole => new THREE.Path(ringPoints(hole)));
@@ -115,7 +116,7 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const hasFacade = feature.properties.building === 'apartments' && floors >= MIN_FACADE_FLOORS;
     const isSchool = feature.properties.building === 'school';
     const wallMaterial = isSchool ? schools.wallMaterial : hasFacade ? facades.wallMaterial : wall;
-    const mesh = new THREE.Mesh(geometry, house ? houseMaterials(String(feature.id ?? feature.properties['@id'] ?? '')) : [roof, wallMaterial]);
+    const mesh = new THREE.Mesh(geometry, house ? houseMaterials(String(feature.id ?? feature.properties['@id'] ?? ''), houseFloorCount > 1 ? 'duplex' : 'house') : [roof, wallMaterial]);
     mesh.castShadow = mesh.receiveShadow = true;
     scene.add(mesh);
     pickTargets.set(mesh, feature);

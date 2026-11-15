@@ -7,6 +7,7 @@ import type { Point2 } from './geometry.ts';
 import { planHipRoof, type HipRoofPlan } from './houseRoof.ts';
 
 const MAX_HOUSE_FOOTPRINT = 450; // m²
+const MAX_HOUSE_FLOORS = 3;      // taller untyped buildings are blocks, not houses
 
 const OVERHANG = 0.45;       // meters the roof sticks out past the walls
 const ROOF_SLOPE = 0.55;     // rise per meter, about 29 degrees
@@ -17,27 +18,29 @@ const BAY_WIDTH = 3;         // meters of wall per window
 const MIN_WINDOW_WALL = 2.2; // shorter walls stay plain plaster
 
 const ROOF_COLORS = [0xe67a3c, 0xd96c32, 0xee8c4e, 0xcf6530];
+const DUPLEX_ROOF_COLORS = [0x8a9096, 0x7b8187, 0x969ba0, 0x6f757b];
 const WALL_COLORS = [0xf6f0e4, 0xefe6d6, 0xf8f5ee];
 const WALL_LIFT = 0.42; // the game's lights leave vertical walls dim
 const ROOF_LIFT = 0.2;  // keeps tiles orange rather than brown
 
 const GROUP_ROOF = 0, GROUP_WINDOWS = 1, GROUP_PLASTER = 2;
 
-/** One-floor home or untyped buildings with a single ring, up to 450 m², and no icon. */
-export function isSingleFloorHouse({ properties, geometry }: BuildingFeature): boolean {
+/** Floors of a home or untyped building that gets a house model, else null. */
+export function houseFloors({ properties, geometry }: BuildingFeature): number | null {
   const group = buildingGroup(properties);
-  if (group !== 'house' && group !== 'unknown') return false;
-  if (buildingIcon(properties) || geometry.coordinates.length > 1) return false;
+  if (group !== 'house' && group !== 'unknown') return null;
+  if (buildingIcon(properties) || geometry.coordinates.length > 1) return null;
   const levels = parseFloat(properties['building:levels'] ?? '');
-  const floors = levels > 0 ? levels : Math.max(1, Math.round(buildingHeight(properties) / LEVEL_HEIGHT));
-  return floors === 1 && ringArea(geometry.coordinates[0]) <= MAX_HOUSE_FOOTPRINT;
+  const floors = levels > 0 ? Math.round(levels) : Math.max(1, Math.round(buildingHeight(properties) / LEVEL_HEIGHT));
+  if (floors < 1 || floors > MAX_HOUSE_FLOORS) return null;
+  return ringArea(geometry.coordinates[0]) <= MAX_HOUSE_FOOTPRINT ? floors : null;
 }
 
 interface Vertex { p: [number, number, number]; uv: [number, number] }
 type Triangle = (group: number, a: Vertex, b: Vertex, c: Vertex, faceUp: boolean) => void;
 
 /** Walls and roof as one geometry with three material groups, in world coordinates. */
-export function createHouseGeometry(footprint: Point2[], wallHeight: number): THREE.BufferGeometry {
+export function createHouseGeometry(footprint: Point2[], wallHeight: number, floors = 1): THREE.BufferGeometry {
   // per group: position (3), normal (3) and uv (2) per vertex
   const buckets: number[][] = [[], [], []];
 
@@ -66,7 +69,7 @@ export function createHouseGeometry(footprint: Point2[], wallHeight: number): TH
     const hasWindows = length >= MIN_WINDOW_WALL && Boolean(plan);
     const group = hasWindows ? GROUP_WINDOWS : GROUP_PLASTER;
     const u1 = hasWindows ? Math.max(1, Math.round(length / BAY_WIDTH)) / 2 : length / BAY_WIDTH;
-    const quad = [[ax, 0, az, 0, 0], [bx, 0, bz, u1, 0], [bx, wallTop, bz, u1, 1], [ax, wallTop, az, 0, 1]];
+    const quad = [[ax, 0, az, 0, 0], [bx, 0, bz, u1, 0], [bx, wallTop, bz, u1, floors], [ax, wallTop, az, 0, floors]];
     for (const corners of [[0, 1, 2], [0, 2, 3]]) {
       for (const k of corners) {
         const [x, y, z, u, v] = quad[k];
@@ -190,7 +193,7 @@ function roofTexture(): THREE.CanvasTexture {
 }
 
 // Two bays side by side, 6 m wide and one wall high: one window open, one with its shutter half down.
-function windowTexture(): THREE.CanvasTexture {
+function windowTexture(floorLine: boolean): THREE.CanvasTexture {
   return canvasTexture(1024, 512, (c, w, h) => {
     c.fillStyle = '#fff';
     c.fillRect(0, 0, w, h);
@@ -208,28 +211,36 @@ function windowTexture(): THREE.CanvasTexture {
       c.fillStyle = '#9ea2a1';
       for (let s = 0; s < shutterH; s += 12) c.fillRect(x, y + s, winW, 3);
     }
+    if (floorLine) {
+      c.fillStyle = 'rgba(120,112,100,0.35)';
+      c.fillRect(0, h - 10, w, 10); // the bottom edge of every row is a floor line
+    }
   });
 }
 
 type HouseMaterials = [roof: THREE.MeshLambertMaterial, windows: THREE.MeshLambertMaterial, plaster: THREE.MeshLambertMaterial];
 
-let sharedTextures: { roof: THREE.CanvasTexture; windows: THREE.CanvasTexture } | null = null;
+type HouseKind = 'house' | 'duplex';
+
+let sharedTextures: { roof: THREE.CanvasTexture; windows: THREE.CanvasTexture; duplexWindows: THREE.CanvasTexture } | null = null;
 const houseMaterialSets = new Map<string, HouseMaterials>(); // shared per roof and wall color
 
 /** Materials in the order of the geometry's groups: roof, windows, plaster. */
-export function houseMaterials(id: string): HouseMaterials {
-  sharedTextures ??= { roof: roofTexture(), windows: windowTexture() };
+export function houseMaterials(id: string, kind: HouseKind = 'house'): HouseMaterials {
+  sharedTextures ??= { roof: roofTexture(), windows: windowTexture(false), duplexWindows: windowTexture(true) };
   const hash = hashId(id);
-  const roofColor = ROOF_COLORS[hash % ROOF_COLORS.length];
+  const roofColors = kind === 'duplex' ? DUPLEX_ROOF_COLORS : ROOF_COLORS;
+  const roofColor = roofColors[hash % roofColors.length];
+  const windowMap = kind === 'duplex' ? sharedTextures.duplexWindows : sharedTextures.windows;
   const wallColor = WALL_COLORS[(hash >>> 8) % WALL_COLORS.length];
-  const key = `${roofColor}-${wallColor}`;
+  const key = `${kind}-${roofColor}-${wallColor}`;
   let set = houseMaterialSets.get(key);
   if (!set) {
     const roofMap = sharedTextures.roof.clone();
     roofMap.needsUpdate = true;
     set = [
       new THREE.MeshLambertMaterial({ color: roofColor, map: roofMap, emissive: roofColor, emissiveMap: roofMap, emissiveIntensity: ROOF_LIFT }),
-      new THREE.MeshLambertMaterial({ color: wallColor, map: sharedTextures.windows, emissive: wallColor, emissiveMap: sharedTextures.windows, emissiveIntensity: WALL_LIFT }),
+      new THREE.MeshLambertMaterial({ color: wallColor, map: windowMap, emissive: wallColor, emissiveMap: windowMap, emissiveIntensity: WALL_LIFT }),
       new THREE.MeshLambertMaterial({ color: wallColor, emissive: wallColor, emissiveIntensity: WALL_LIFT }),
     ];
     houseMaterialSets.set(key, set);
