@@ -14,7 +14,7 @@
     A D / ← → steer · C switch camera<br />
     Click a building for details<br />
     <kbd>P</kbd> settings · <kbd>V</kbd> building view<br />
-    <kbd>M</kbd> performance panel<br />
+    <kbd>M</kbd> performance panel · <kbd>F</kbd> favorites<br />
     Speed: <span id="speed">0</span> km/h
   </div>
 
@@ -43,6 +43,13 @@
     <div class="tip-sub"><span class="swatch" id="tip-swatch"></span><span id="tip-group"></span><span id="tip-id"></span></div>
     <dl class="tip-facts" id="tip-facts"></dl>
     <dl class="tip-tags" id="tip-tags"></dl>
+  </div>
+
+  <div id="favorites-wrap">
+    <button id="favorites-button" type="button" aria-label="Favorites" aria-keyshortcuts="F" aria-describedby="favorites-tip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l2.7 5.5 6 .9-4.35 4.25 1.03 6L12 17l-5.38 2.85 1.03-6L3.3 9.6l6-.9z"/></svg>
+    </button>
+    <span id="favorites-tip" role="tooltip">Favorites <kbd>F</kbd></span>
   </div>
 
   <div id="settings-wrap">
@@ -106,6 +113,16 @@
         <button class="primary" type="submit" id="settings-save">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="favorites-dialog" aria-labelledby="favorites-title">
+    <div class="dlg-head"><h3 id="favorites-title">Favorites</h3><button class="close" type="button" id="favorites-close" aria-label="Close">×</button></div>
+    <div class="fav-save">
+      <button class="primary" type="button" id="favorites-save">☆ Save current location</button>
+      <p class="hint" id="favorites-hint"></p>
+    </div>
+    <ul class="fav-list" id="favorites-list"></ul>
+    <p class="fav-note" id="favorites-note" hidden></p>
   </dialog>
 
   <script type="module" src="/src/main.ts"></script>

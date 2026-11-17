@@ -225,6 +225,7 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
 
   addEventListener('keydown', e => {
     if (e.code !== SETTINGS_SHORTCUT || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+    if (!dialog.open && document.querySelector('dialog[open]')) return; // another dialog is open
     e.preventDefault(); // stops the "p" landing in the field that open() focuses
     if (dialog.open) dialog.close(); else open();
   });

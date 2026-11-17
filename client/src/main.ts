@@ -8,6 +8,7 @@ import { chaseOffset } from './car/vehicles.ts';
 import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
+import { createFavoritesDialog } from './hud/favoritesDialog.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
 import { createPerfMonitor } from './hud/perfMonitor.ts';
 import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
@@ -17,7 +18,7 @@ import { buildingInfo } from './town/buildingInfo.ts';
 import { createBuildingPicker } from './town/buildingPicker.ts';
 import { addBuildings } from './town/buildings.ts';
 import { currentStreet, hitsVehicle, outsideDepth, vehicleOverlap } from './town/collision.ts';
-import { fromWorld, loadSettings, saveSettings, speedLimitOf, appearanceOf, monitoringEnabled, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
+import { favoritesOf, fromWorld, loadSettings, saveFavorites, saveSettings, speedLimitOf, appearanceOf, monitoringEnabled, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
 import { addRoads, findStart } from './town/roads.ts';
 
 const MAX_FRAME_TIME = 0.05; // seconds
@@ -78,14 +79,11 @@ async function main(): Promise<void> {
       carPoint: () => fromWorld(car.position),
       preview: point => findStart(roads.segments, toWorld(point)),
       bounds: town.bbox,
-      onOpenChange: open => {
-        car.setInputEnabled(!open);
-        followCamera.setInputEnabled(!open);
-      },
+      onOpenChange: open => onDialogOpenChange(open),
       onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring }) => {
         const latest = loadSettings();
         const previous = townSettings(latest, DEFAULT_TOWN).startPoint;
-        latest.towns[DEFAULT_TOWN] = { startPoint };
+        latest.towns[DEFAULT_TOWN] = { ...latest.towns[DEFAULT_TOWN], startPoint };
         latest.speedLimitKmh = speedLimitKmh;
         latest.vehicle = vehicle;
         latest.appearance = newAppearance;
@@ -112,6 +110,27 @@ async function main(): Promise<void> {
       },
     });
 
+    const onDialogOpenChange = (open: boolean) => {
+      car.setInputEnabled(!open);
+      followCamera.setInputEnabled(!open);
+    };
+
+    const favorites = createFavoritesDialog({
+      load: () => favoritesOf(loadSettings(), DEFAULT_TOWN),
+      store: list => saveFavorites(DEFAULT_TOWN, list),
+      carPoint: () => fromWorld(car.position),
+      streetHere: () => currentStreet(roads.segments, car.position.x, car.position.z),
+      onOpenChange: onDialogOpenChange,
+      goTo: favorite => {
+        const point = toWorld(favorite);
+        const road = findStart(roads.segments, point);
+        const blocked = hitsVehicle(obstacles, point.x, point.z, road.heading, carModel.collision)
+          || outsideDepth(town.bbox, point.x, point.z) > 0;
+        car.resetTo(blocked ? road : { x: point.x, z: point.z, heading: road.heading });
+        followCamera.jumpTo(car.position, car.heading);
+      },
+    });
+
     addEventListener('keydown', e => {
       const plainKey = !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(e.target);
       if (e.code === MONITORING_SHORTCUT && plainKey) {
@@ -123,13 +142,13 @@ async function main(): Promise<void> {
           saveSettings({ ...loadSettings(), monitoring: show }); // if storage fails the panel still toggles
         }
       }
-      if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen) {
+      if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen) {
         // Flips the saved building view; the dialog's Buildings choice stays the way to pick one explicitly.
         appearance = appearance === 'plain' ? 'realistic' : 'plain';
         setAppearance(appearance);
         saveSettings({ ...loadSettings(), appearance });
       }
-      if (e.code === 'Escape' && !settingsDialog.isOpen) tooltip.close();
+      if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen) tooltip.close();
     });
 
     function tick(dt: number): void {

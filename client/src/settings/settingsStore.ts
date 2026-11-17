@@ -1,4 +1,4 @@
-import { SETTINGS_STORAGE_KEY } from '../config.ts';
+import { MAX_FAVORITES, SETTINGS_STORAGE_KEY } from '../config.ts';
 import type { Appearance } from '../town/buildings.ts';
 import { DEFAULT_VEHICLE, vehicleById } from '../car/vehicles.ts';
 
@@ -8,8 +8,15 @@ export interface MapPoint {
   y: number;
 }
 
+/** A saved place the car can be sent back to. */
+export interface Favorite extends MapPoint {
+  id: string;
+  name: string;
+}
+
 export interface TownSettings {
   startPoint: MapPoint;
+  favorites?: Favorite[];
 }
 
 export const DEFAULT_SPEED_LIMIT_KMH = 79;
@@ -65,6 +72,22 @@ export function monitoringEnabled(settings: Settings): boolean {
 export function townSettings(settings: Settings, townId: string): TownSettings {
   const point = settings.towns[townId]?.startPoint;
   return Number.isFinite(point?.x) && Number.isFinite(point?.y) ? { startPoint: point! } : DEFAULT_TOWN_SETTINGS;
+}
+
+/** The town's saved favorites; entries without an id, a name or finite coordinates are dropped. */
+export function favoritesOf(settings: Settings, townId: string): Favorite[] {
+  const list = settings.towns[townId]?.favorites;
+  return Array.isArray(list)
+    ? list.filter(f => typeof f?.id === 'string' && typeof f.name === 'string' && f.name.trim() !== ''
+        && Number.isFinite(f.x) && Number.isFinite(f.y)).slice(0, MAX_FAVORITES)
+    : [];
+}
+
+/** Writes the town's list, keeping its starting point. Returns false when the browser refused. */
+export function saveFavorites(townId: string, favorites: Favorite[]): boolean {
+  const latest = loadSettings();
+  latest.towns[townId] = { ...townSettings(latest, townId), favorites };
+  return saveSettings(latest);
 }
 
 /** Returns false when the browser refused to store it. */
