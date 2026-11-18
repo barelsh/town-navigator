@@ -11,7 +11,7 @@ const LABEL_CANVAS_HEIGHT = 96;    // pixels
 const LABEL_CANVAS_PADDING = 16;   // pixels
 const LABEL_OUTLINE = 10;          // pixels; hides center line dashes behind the text
 
-interface LabelMaterial {
+export interface LabelMaterial {
   material: THREE.MeshBasicMaterial;
   aspect: number;
 }
@@ -23,62 +23,74 @@ interface LabelOrientation {
   angle: number;
 }
 
+/** Built once: the label plane and one material per street name, shared by every chunk. */
+export interface LabelKit {
+  plane: THREE.PlaneGeometry;
+  materials: Map<string, LabelMaterial>;
+  renderer: THREE.WebGLRenderer;
+}
+
+export function createLabelKit(renderer: THREE.WebGLRenderer): LabelKit {
+  return { plane: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), materials: new Map(), renderer };
+}
+
 export interface StreetLabels {
   /** Adds labels along one road, spaced out and skipping nearby repeats of the name. */
   add(name: string, points: Point2[], length: number, roadWidth: number): void;
   setHeight(y: number): void;
   /** Flips labels so they read upright for a car with this heading. */
   update(heading: number): void;
+  /** Removes the labels. The kit's plane and materials stay. */
+  dispose(): void;
 }
 
-export function createStreetLabels(scene: THREE.Scene, renderer: THREE.WebGLRenderer): StreetLabels {
-  const plane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-  const group = new THREE.Group();
-  scene.add(group);
+function labelMaterial(kit: LabelKit, name: string): LabelMaterial {
+  const cached = kit.materials.get(name);
+  if (cached) return cached;
 
-  const materials = new Map<string, LabelMaterial>(); // shared per street name
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d')!;
+  const font = `600 ${LABEL_FONT_SIZE}px system-ui, sans-serif`;
+  context.font = font;
+  canvas.width = Math.ceil(context.measureText(name).width) + LABEL_CANVAS_PADDING * 2;
+  canvas.height = LABEL_CANVAS_HEIGHT;
+
+  context.font = font; // resizing the canvas reset it
+  context.direction = 'rtl';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.lineJoin = 'round';
+  context.lineWidth = LABEL_OUTLINE;
+  context.strokeStyle = '#3b3f46';
+  context.strokeText(name, canvas.width / 2, canvas.height / 2);
+  context.fillStyle = '#f5f1d0';
+  context.fillText(name, canvas.width / 2, canvas.height / 2);
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = kit.renderer.capabilities.getMaxAnisotropy(); // stays sharp at low view angles
+  const label = {
+    material: new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false }),
+    aspect: canvas.width / canvas.height,
+  };
+  kit.materials.set(name, label);
+  return label;
+}
+
+/** The labels of one chunk. Labels of the same street are kept apart within the chunk. */
+export function createStreetLabels(parent: THREE.Object3D, kit: LabelKit): StreetLabels {
+  const group = new THREE.Group();
+  parent.add(group);
+
   const placedLabels = new Map<string, Point2[]>();
   const orientations: LabelOrientation[] = [];
-
-  function labelMaterial(name: string): LabelMaterial {
-    const cached = materials.get(name);
-    if (cached) return cached;
-
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d')!;
-    const font = `600 ${LABEL_FONT_SIZE}px system-ui, sans-serif`;
-    context.font = font;
-    canvas.width = Math.ceil(context.measureText(name).width) + LABEL_CANVAS_PADDING * 2;
-    canvas.height = LABEL_CANVAS_HEIGHT;
-
-    context.font = font; // resizing the canvas reset it
-    context.direction = 'rtl';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.lineJoin = 'round';
-    context.lineWidth = LABEL_OUTLINE;
-    context.strokeStyle = '#3b3f46';
-    context.strokeText(name, canvas.width / 2, canvas.height / 2);
-    context.fillStyle = '#f5f1d0';
-    context.fillText(name, canvas.width / 2, canvas.height / 2);
-
-    const map = new THREE.CanvasTexture(canvas);
-    map.colorSpace = THREE.SRGBColorSpace;
-    map.anisotropy = renderer.capabilities.getMaxAnisotropy(); // stays sharp at low view angles
-    const label = {
-      material: new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false }),
-      aspect: canvas.width / canvas.height,
-    };
-    materials.set(name, label);
-    return label;
-  }
 
   return {
     add(name, points, length, roadWidth) {
       const count = Math.max(1, Math.floor(length / LABEL_SPACING));
       const placed = placedLabels.get(name) ?? [];
       placedLabels.set(name, placed);
-      const { material, aspect } = labelMaterial(name);
+      const { material, aspect } = labelMaterial(kit, name);
 
       // Short roads shrink the text so it stays on the road.
       const fullHeight = Math.min(roadWidth * LABEL_ROAD_RATIO, LABEL_MAX_HEIGHT);
@@ -100,7 +112,7 @@ export function createStreetLabels(scene: THREE.Scene, renderer: THREE.WebGLRend
         placed.push([x, z]);
 
         const dirX = (bx - ax) / chord, dirZ = (bz - az) / chord;
-        const mesh = new THREE.Mesh(plane, material);
+        const mesh = new THREE.Mesh(kit.plane, material);
         mesh.scale.set(textLength, 1, textHeight);
         mesh.position.set(x, 0, z);
         group.add(mesh);
@@ -110,6 +122,12 @@ export function createStreetLabels(scene: THREE.Scene, renderer: THREE.WebGLRend
 
     setHeight(y) {
       group.position.y = y;
+    },
+
+    dispose() {
+      group.removeFromParent();
+      group.clear();
+      orientations.length = 0;
     },
 
     // Both cameras look along the car, so text reads upright when it runs toward the car's right.

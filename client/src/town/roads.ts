@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import type { RoadFeature, Town, TownFeature } from '@town-navigator/shared';
+import type { RoadFeature, TownFeature } from '@town-navigator/shared';
 import type { Point2 } from './geometry.ts';
-import { MIN_DRIVABLE_LAYER, roadStyle, type RoadStyle } from './roadStyles.ts';
-import { createStreetLabels, type StreetLabels } from './streetLabels.ts';
+import { MIN_DRIVABLE_LAYER, ROAD_RANKS, roadRank, roadStyle, type RoadStyle } from './roadStyles.ts';
+import { createStreetLabels, type LabelKit, type StreetLabels } from './streetLabels.ts';
 
 const ROAD_BASE_Y = 0.05;
-const ROAD_LAYER_GAP = 0.008;
+const ROAD_RANK_GAP = 0.004; // meters; fixed per (layer, color) so tiles line up
 const LINE_WIDTH = 0.25;
 const DASH_LENGTH = 2.2;
 const DASH_SPACING = 5;
@@ -30,6 +30,29 @@ export interface StartPosition {
 export interface RoadNetwork {
   segments: StreetSegment[];
   labels: StreetLabels;
+  /** Removes the roads from the scene and frees their geometries. Kit materials stay. */
+  dispose(): void;
+}
+
+/** Built once: one surface material per color and the center line material, shared by every chunk. */
+export interface RoadKit {
+  surface(color: number): THREE.MeshLambertMaterial;
+  line: THREE.MeshBasicMaterial;
+}
+
+export function createRoadKit(): RoadKit {
+  const surfaces = new Map<number, THREE.MeshLambertMaterial>();
+  return {
+    surface(color) {
+      let material = surfaces.get(color);
+      if (!material) {
+        material = new THREE.MeshLambertMaterial({ color });
+        surfaces.set(color, material);
+      }
+      return material;
+    },
+    line: new THREE.MeshBasicMaterial({ color: 0xf5f1d0 }),
+  };
 }
 
 interface SurfaceBucket {
@@ -101,9 +124,13 @@ export function findStart(segments: StreetSegment[], target: { x: number; z: num
 const isRoad = (feature: TownFeature): feature is RoadFeature =>
   Boolean(feature.properties.highway) && feature.geometry.type === 'LineString';
 
-/** Draws all roads merged into one mesh per layer and color. */
-export function addRoads(scene: THREE.Scene, renderer: THREE.WebGLRenderer, town: Town): RoadNetwork {
-  const labels = createStreetLabels(scene, renderer);
+/** Draws the roads among the features, merged into one mesh per layer and color, into the parent. */
+export function addRoads(
+  parent: THREE.Object3D,
+  features: TownFeature[],
+  kit: { roads: RoadKit; labels: LabelKit },
+): RoadNetwork {
+  const labels = createStreetLabels(parent, kit.labels);
   const segments: StreetSegment[] = [];
   const buckets = new Map<string, SurfaceBucket>();
   const linePositions: number[] = [];
@@ -118,7 +145,7 @@ export function addRoads(scene: THREE.Scene, renderer: THREE.WebGLRenderer, town
     return bucket.positions;
   }
 
-  for (const road of town.features.filter(isRoad)) {
+  for (const road of features.filter(isRoad)) {
     const style = roadStyle(road.properties);
     if (!style) continue;
 
@@ -145,19 +172,35 @@ export function addRoads(scene: THREE.Scene, renderer: THREE.WebGLRenderer, town
     if (road.properties.name && travelled > 0) labels.add(road.properties.name, points, travelled, style.width);
   }
 
-  // Each bucket gets its own height so overlapping road surfaces don't flicker.
-  const sortedBuckets = [...buckets.values()].sort((a, b) => a.layer - b.layer || a.color - b.color);
-  sortedBuckets.forEach(({ color, positions }, i) => {
-    const surface = flatMesh(positions, new THREE.MeshLambertMaterial({ color }));
-    surface.position.y = ROAD_BASE_Y + i * ROAD_LAYER_GAP;
+  // Each (layer, color) pair has a fixed height, so overlapping road surfaces don't flicker and tiles line up.
+  const meshes: THREE.Mesh[] = [];
+  for (const { layer, color, positions } of buckets.values()) {
+    const surface = flatMesh(positions, kit.roads.surface(color));
+    surface.position.y = ROAD_BASE_Y + roadRank({ layer, color }) * ROAD_RANK_GAP;
     surface.receiveShadow = true;
-    scene.add(surface);
-  });
+    parent.add(surface);
+    meshes.push(surface);
+  }
 
-  const centerLines = flatMesh(linePositions, new THREE.MeshBasicMaterial({ color: 0xf5f1d0 }));
-  centerLines.position.y = ROAD_BASE_Y + sortedBuckets.length * ROAD_LAYER_GAP;
-  scene.add(centerLines);
-  labels.setHeight(centerLines.position.y + ROAD_LAYER_GAP);
+  const lineY = ROAD_BASE_Y + ROAD_RANKS * ROAD_RANK_GAP;
+  if (linePositions.length) {
+    const centerLines = flatMesh(linePositions, kit.roads.line);
+    centerLines.position.y = lineY;
+    parent.add(centerLines);
+    meshes.push(centerLines);
+  }
+  labels.setHeight(lineY + ROAD_RANK_GAP);
 
-  return { segments, labels };
+  return {
+    segments,
+    labels,
+    dispose() {
+      labels.dispose();
+      for (const mesh of meshes) {
+        mesh.removeFromParent();
+        mesh.geometry.dispose();
+      }
+      meshes.length = 0;
+    },
+  };
 }

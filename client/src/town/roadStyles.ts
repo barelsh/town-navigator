@@ -7,6 +7,15 @@ const LANE_WIDTH = 3.5;
 const ASPHALT = 0x3b3f46, PAVERS = 0x8f8a80, CONCRETE = 0xa9a9a4, DIRT = 0x9a7b54;
 const FOOTPATH = 0xc9c4b8, CYCLE_LANE = 0xa8584a;
 
+/** Every road color in a fixed order, so a (layer, color) pair always gets the same surface height. */
+export const ROAD_COLORS = [ASPHALT, CONCRETE, PAVERS, DIRT, CYCLE_LANE, FOOTPATH] as const;
+export const ROAD_RANKS = 8 * ROAD_COLORS.length; // layers 0-7
+
+export function roadRank({ layer, color }: Pick<RoadStyle, 'layer' | 'color'>): number {
+  const index = ROAD_COLORS.indexOf(color as (typeof ROAD_COLORS)[number]);
+  return layer * ROAD_COLORS.length + (index < 0 ? 0 : index);
+}
+
 export interface RoadStyle {
   width: number; // meters
   color: number;

@@ -54,9 +54,36 @@ export function wallsOf(ring: Point2[]): Wall[] {
   });
 }
 
-/** Collects unit boxes per part type, then turns each type into one instanced mesh. */
-export function createPartStore<P extends string>(definitions: Record<P, PartDefinition>) {
-  const names = Object.keys(definitions) as P[];
+/** Materials and the unit box for one set of part definitions. Built once and shared by every chunk. */
+export interface PartMaterials<P extends string> {
+  box: THREE.BoxGeometry;
+  materials: Record<P, THREE.MeshLambertMaterial>;
+  definitions: Record<P, PartDefinition>;
+}
+
+export function createPartMaterials<P extends string>(definitions: Record<P, PartDefinition>): PartMaterials<P> {
+  const materials = {} as Record<P, THREE.MeshLambertMaterial>;
+  for (const name of Object.keys(definitions) as P[]) {
+    const def = definitions[name];
+    const material = new THREE.MeshLambertMaterial(def.map ? { map: def.map } : { color: def.color });
+    if (def.opacity) Object.assign(material, { transparent: true, opacity: def.opacity, depthWrite: false });
+    if (def.lift) {
+      material.emissiveIntensity = def.lift;
+      if (def.map) {
+        material.emissive.set(0xffffff);
+        material.emissiveMap = def.map;
+      } else {
+        material.emissive.set(def.color!);
+      }
+    }
+    materials[name] = material;
+  }
+  return { box: new THREE.BoxGeometry(1, 1, 1), materials, definitions };
+}
+
+/** Collects unit boxes per part type for one chunk, then turns each type into one instanced mesh. */
+export function createPartStore<P extends string>(kit: PartMaterials<P>) {
+  const names = Object.keys(kit.definitions) as P[];
   const parts = Object.fromEntries(names.map(name => [name, [] as THREE.Matrix4[]])) as Record<P, THREE.Matrix4[]>;
   const matrix = new THREE.Matrix4(), u = new THREE.Vector3(), n = new THREE.Vector3(), size = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
@@ -69,37 +96,33 @@ export function createPartStore<P extends string>(definitions: Record<P, PartDef
       parts[part].push(matrix.clone());
     },
 
-    /** Adds one instanced mesh per part type to the parent. */
-    finish(parent: THREE.Object3D): FacadeStats {
-      const box = new THREE.BoxGeometry(1, 1, 1);
-      let boxes = 0, calls = 0;
+    /** Adds one instanced mesh per part type to the parent. The meshes are returned so the chunk can dispose them. */
+    finish(parent: THREE.Object3D): { stats: FacadeStats; meshes: THREE.InstancedMesh[] } {
+      const meshes: THREE.InstancedMesh[] = [];
+      let boxes = 0;
       for (const name of names) {
-        const def = definitions[name], list = parts[name];
+        const def = kit.definitions[name], list = parts[name];
         if (!list.length) continue;
 
-        const material = new THREE.MeshLambertMaterial(def.map ? { map: def.map } : { color: def.color });
-        if (def.opacity) Object.assign(material, { transparent: true, opacity: def.opacity, depthWrite: false });
-        if (def.lift) {
-          material.emissiveIntensity = def.lift;
-          if (def.map) {
-            material.emissive.set(0xffffff);
-            material.emissiveMap = def.map;
-          } else {
-            material.emissive.set(def.color!);
-          }
-        }
-
-        const mesh = new THREE.InstancedMesh(box, material, list.length);
+        const mesh = new THREE.InstancedMesh(kit.box, kit.materials[name], list.length);
         list.forEach((m, i) => mesh.setMatrixAt(i, m));
         mesh.instanceMatrix.needsUpdate = true;
-        mesh.frustumCulled = false; // each mesh spans the town
+        mesh.frustumCulled = false; // each mesh spans the chunk
         mesh.castShadow = Boolean(def.shadow);
         mesh.receiveShadow = !def.opacity;
         parent.add(mesh);
+        meshes.push(mesh);
         boxes += list.length;
-        calls++;
       }
-      return { boxes, calls };
+      return { stats: { boxes, calls: meshes.length }, meshes };
     },
   };
+}
+
+/** What one chunk's facade builder offers: add parts for a building, then finish into instanced meshes. */
+export interface FacadeBuilder {
+  /** Adds parts for one building. `footprint` is its outer ring in world [x, z], without the repeated last point. */
+  add(id: string, footprint: Point2[], height: number, floors: number): void;
+  /** Adds one instanced mesh per part type to the parent. */
+  finish(parent: THREE.Object3D): { stats: FacadeStats; meshes: THREE.InstancedMesh[] };
 }

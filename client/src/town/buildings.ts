@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import type { Position } from 'geojson';
-import type { BuildingFeature, Town, TownFeature } from '@town-navigator/shared';
-import { createApartmentFacades, MIN_FACADE_FLOORS } from './apartmentFacade.ts';
-import { floorCount } from './facadeKit.ts';
+import type { BuildingFeature, TownFeature } from '@town-navigator/shared';
+import { MIN_FACADE_FLOORS, type ApartmentFacadeKit } from './apartmentFacade.ts';
+import { floorCount, hashId } from './facadeKit.ts';
 import { createHouseGeometry, houseMaterials, houseFloors } from './houseModel.ts';
-import { createSchoolFacades } from './schoolFacade.ts';
+import type { SchoolFacadeKit } from './schoolFacade.ts';
 import { buildingGroup, buildingHeight, buildingIcon, GROUP_COLORS, ROOF_SHADE, UNKNOWN_SHADES } from './buildingStyles.ts';
 import type { Obstacle } from './collision.ts';
 import type { Point2 } from './geometry.ts';
@@ -59,11 +59,11 @@ function iconMaterial(icon: string): THREE.SpriteMaterial {
   return material;
 }
 
-function addBuildingIcon(scene: THREE.Scene, icon: string, x: number, z: number, roofHeight: number): THREE.Sprite {
+function addBuildingIcon(parent: THREE.Object3D, icon: string, x: number, z: number, roofHeight: number): THREE.Sprite {
   const sprite = new THREE.Sprite(iconMaterial(icon));
   sprite.scale.setScalar(ICON_SIZE);
   sprite.position.set(x, roofHeight + ICON_CLEARANCE + ICON_SIZE / 2, z);
-  scene.add(sprite);
+  parent.add(sprite);
   return sprite;
 }
 
@@ -87,23 +87,30 @@ export interface Buildings {
   pickTargets: Map<THREE.Object3D, BuildingFeature>;
   /** Switches every realistic model to flat colored blocks, or back, without rebuilding anything. */
   setAppearance(appearance: Appearance): void;
+  /** Removes the buildings from their parent and frees their geometries. Kit materials and textures stay. */
+  dispose(): void;
 }
 
-export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
-  // Deterministic random so the town looks the same on every reload
-  let seed = 7;
-  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-
+/** Adds the buildings among the features to the parent, in the given appearance. */
+export function addBuildings(
+  parent: THREE.Object3D,
+  features: TownFeature[],
+  kit: { apartments: ApartmentFacadeKit; schools: SchoolFacadeKit },
+  appearance: Appearance,
+): Buildings {
   const obstacles: Obstacle[] = [];
   let tallestBuilding = 0;
   const pickTargets = new Map<THREE.Object3D, BuildingFeature>();
-  const facades = createApartmentFacades();
-  const schools = createSchoolFacades();
+  const facades = kit.apartments.begin();
+  const schools = kit.schools.begin();
   const realisticParts = new THREE.Group(); // every facade part, hidden as one in the plain view
-  scene.add(realisticParts);
+  parent.add(realisticParts);
   const swaps: AppearanceSwap[] = [];
+  const geometries = new Set<THREE.BufferGeometry>(); // everything this call created, for dispose
+  const objects: THREE.Object3D[] = [];
+  let facadeMeshes: THREE.InstancedMesh[] = [];
 
-  for (const feature of town.features.filter(isBuilding)) {
+  for (const feature of features.filter(isBuilding)) {
     const [outer, ...holes] = feature.geometry.coordinates;
     const height = buildingHeight(feature.properties);
     const ring = outer.slice(0, -1).map(([x, y]): Point2 => [x, -y]);
@@ -116,21 +123,25 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     const plainGeometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
     plainGeometry.rotateX(-Math.PI / 2);
     const geometry = house ? createHouseGeometry(ring, height, houseFloorCount) : plainGeometry;
+    geometries.add(plainGeometry).add(geometry);
 
+    const featureId = String(feature.id ?? feature.properties['@id'] ?? '');
     const group = buildingGroup(feature.properties);
-    const shade = group === 'unknown' ? UNKNOWN_SHADES[Math.floor(rand() * UNKNOWN_SHADES.length)] : 1;
+    // From the id alone, so a building keeps its shade whatever order buildings load in.
+    const shade = group === 'unknown' ? UNKNOWN_SHADES[hashId(featureId) % UNKNOWN_SHADES.length] : 1;
     const color = new THREE.Color(GROUP_COLORS[group]).multiplyScalar(shade);
     const [roof, wall] = materialsFor(color);
     const floors = floorCount(feature.properties, height);
     const hasFacade = feature.properties.building === 'apartments' && floors >= MIN_FACADE_FLOORS;
     const isSchool = feature.properties.building === 'school';
-    const wallMaterial = isSchool ? schools.wallMaterial : hasFacade ? facades.wallMaterial : wall;
+    const wallMaterial = isSchool ? kit.schools.wallMaterial : hasFacade ? kit.apartments.wallMaterial : wall;
     const realisticMaterial = house
-      ? houseMaterials(String(feature.id ?? feature.properties['@id'] ?? ''), houseFloorCount > 1 ? 'duplex' : 'house')
+      ? houseMaterials(featureId, houseFloorCount > 1 ? 'duplex' : 'house')
       : [roof, wallMaterial];
     const mesh = new THREE.Mesh(geometry, realisticMaterial);
     mesh.castShadow = mesh.receiveShadow = true;
-    scene.add(mesh);
+    parent.add(mesh);
+    objects.push(mesh);
     pickTargets.set(mesh, feature);
     if (house) {
       swaps.push({ mesh, plain: { geometry: plainGeometry, material: [roof, wall] }, realistic: { geometry, material: realisticMaterial } });
@@ -140,7 +151,6 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
       }
     }
 
-    const featureId = String(feature.id ?? feature.properties['@id'] ?? '');
     if (hasFacade) facades.add(featureId, ring, height, floors);
     if (isSchool) schools.add(featureId, ring, height, floors);
     const xs = ring.map(p => p[0]), zs = ring.map(p => p[1]);
@@ -153,12 +163,12 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
 
     const icon = buildingIcon(feature.properties);
     if (icon) {
-      const sprite = addBuildingIcon(scene, icon, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, height);
+      const sprite = addBuildingIcon(parent, icon, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, height);
+      objects.push(sprite);
       pickTargets.set(sprite, feature);
     }
   }
-  facades.finish(realisticParts);
-  schools.finish(realisticParts);
+  facadeMeshes = [...facades.finish(realisticParts).meshes, ...schools.finish(realisticParts).meshes];
 
   function setAppearance(appearance: Appearance): void {
     const realistic = appearance === 'realistic';
@@ -170,5 +180,18 @@ export function addBuildings(scene: THREE.Scene, town: Town): Buildings {
     }
   }
 
-  return { obstacles, tallestBuilding, pickTargets, setAppearance };
+  setAppearance(appearance); // before the first frame
+
+  let disposed = false;
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    realisticParts.removeFromParent();
+    for (const object of objects) object.removeFromParent();
+    for (const mesh of facadeMeshes) mesh.dispose(); // the shared unit box and the materials stay
+    for (const geometry of geometries) geometry.dispose(); // both sides of each appearance swap
+    pickTargets.clear();
+  }
+
+  return { obstacles, tallestBuilding, pickTargets, setAppearance, dispose };
 }
