@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import './styles.css';
-import { fetchTown } from './api/townApi.ts';
+import { fetchTileIndex, fetchTown } from './api/townApi.ts';
 import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
 import { chaseOffset } from './car/vehicles.ts';
-import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT } from './config.ts';
+import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT, TOWN_LOAD_MODE } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createFavoritesDialog } from './hud/favoritesDialog.ts';
@@ -19,7 +19,8 @@ import { createBuildingPicker } from './town/buildingPicker.ts';
 import { currentStreet, hitsVehicle, outsideDepth, vehicleOverlap } from './town/collision.ts';
 import { favoritesOf, fromWorld, loadSettings, saveFavorites, saveSettings, speedLimitOf, appearanceOf, monitoringEnabled, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
 import { findStart } from './town/roads.ts';
-import { buildChunk, createTownKit } from './town/townChunk.ts';
+import { createTileManager, createWholeTown, type TownTiles } from './town/tileManager.ts';
+import { createTownKit } from './town/townChunk.ts';
 
 const MAX_FRAME_TIME = 0.05; // seconds
 
@@ -27,38 +28,41 @@ async function main(): Promise<void> {
   const status = document.getElementById('status')!;
 
   try {
-    const town = await fetchTown(DEFAULT_TOWN);
-
     const stage = createStage();
     const { renderer, scene, camera } = stage;
-
-    addGround(scene, town.bbox);
 
     const settings = loadSettings();
     const perf = createPerfMonitor(renderer);
     perf.setVisible(monitoringEnabled(settings));
     let appearance = appearanceOf(settings);
     const kit = createTownKit(renderer);
-    const chunk = buildChunk(kit, town.features, appearance); // built in the saved appearance
-    scene.add(chunk.group);
-    const { obstacles, tallestBuilding, pickTargets, occluders } = chunk;
+    const streaming = TOWN_LOAD_MODE === 'tiles';
+    status.textContent = streaming ? 'Loading tiles…' : 'Loading town…';
+    const tiles: TownTiles = streaming
+      ? createTileManager(DEFAULT_TOWN, scene, kit, appearance, await fetchTileIndex(DEFAULT_TOWN))
+      : createWholeTown(scene, kit, await fetchTown(DEFAULT_TOWN), appearance);
+    addGround(scene, tiles.index.bbox);
+
     const carModel = createCarModel(vehicleOf(settings));
     scene.add(carModel.group);
     const target = toWorld(townSettings(settings, DEFAULT_TOWN).startPoint);
-    const car = createCarController(carModel, findStart(chunk.segments, target), (x, z, heading) =>
-      Math.max(vehicleOverlap(obstacles, x, z, heading, carModel.collision), outsideDepth(town.bbox, x, z)));
+    await tiles.ensureLoaded(target); // the 3 x 3 around the start point, before the first frame
+    const car = createCarController(carModel, findStart(tiles.segmentsNear(target), target), (x, z, heading) =>
+      Math.max(vehicleOverlap(tiles.obstaclesNear(), x, z, heading, carModel.collision), outsideDepth(tiles.index.bbox, x, z)));
+    tiles.update(car.position);
 
     car.setSpeedLimit(speedLimitOf(settings)); // before the first frame
 
-    const followCamera = createFollowCamera(camera, car.position, tallestBuilding, occluders);
+    const followCamera = createFollowCamera(camera, car.position, tiles.tallestBuilding, tiles.occluders);
     followCamera.setChaseOffset(chaseOffset(carModel.spec));
     followCamera.jumpTo(car.position, car.heading);
+    tiles.onChange(() => followCamera.setTallestBuilding(tiles.tallestBuilding));
     const speedDisplay = createSpeedDisplay();
     const compass = createCompass();
-    const streetReadout = createStreetReadout((x, z) => currentStreet(chunk.segments, x, z));
+    const streetReadout = createStreetReadout((x, z) => currentStreet(tiles.segmentsNear(), x, z));
 
     const tooltip = createBuildingTooltip();
-    const picker = createBuildingPicker(camera, pickTargets);
+    const picker = createBuildingPicker(camera, tiles.pickTargets);
     renderer.domElement.addEventListener('click', e => {
       const hit = picker.pick(e.clientX, e.clientY, renderer.domElement);
       if (hit) tooltip.open(buildingInfo(hit.feature), hit.point);
@@ -77,8 +81,12 @@ async function main(): Promise<void> {
         };
       },
       carPoint: () => fromWorld(car.position),
-      preview: point => findStart(chunk.segments, toWorld(point)),
-      bounds: town.bbox,
+      preview: async point => {
+        const world = toWorld(point);
+        await tiles.ensureLoaded(world);
+        return findStart(tiles.segmentsNear(world), world);
+      },
+      bounds: tiles.index.bbox,
       onOpenChange: open => onDialogOpenChange(open),
       onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring }) => {
         const latest = loadSettings();
@@ -90,19 +98,23 @@ async function main(): Promise<void> {
         latest.monitoring = monitoring;
         perf.setVisible(monitoring);
         appearance = newAppearance;
-        chunk.setAppearance(newAppearance);
+        tiles.setAppearance(newAppearance);
         car.setSpeedLimit(speedLimitKmh);
         // Only a new starting point moves the car; a new limit alone must not interrupt driving.
         if (startPoint.x !== previous.x || startPoint.y !== previous.y) {
-          car.resetTo(findStart(chunk.segments, toWorld(startPoint)));
-          followCamera.jumpTo(car.position, car.heading);
+          const world = toWorld(startPoint);
+          void tiles.ensureLoaded(world).then(() => { // load first, then place
+            car.resetTo(findStart(tiles.segmentsNear(world), world));
+            tiles.update(car.position);
+            followCamera.jumpTo(car.position, car.heading);
+          });
         }
         if (vehicle !== carModel.spec.id) {
           carModel.setVehicle(vehicle);
           followCamera.setChaseOffset(chaseOffset(carModel.spec));
           // A bigger vehicle may not fit where the car stands: move it to the nearest road and stop there.
-          if (hitsVehicle(obstacles, car.position.x, car.position.z, car.heading, carModel.collision)) {
-            car.resetTo(findStart(chunk.segments, { x: car.position.x, z: car.position.z }));
+          if (hitsVehicle(tiles.obstaclesNear(), car.position.x, car.position.z, car.heading, carModel.collision)) {
+            car.resetTo(findStart(tiles.segmentsNear(), { x: car.position.x, z: car.position.z }));
             followCamera.jumpTo(car.position, car.heading);
           }
         }
@@ -119,14 +131,16 @@ async function main(): Promise<void> {
       load: () => favoritesOf(loadSettings(), DEFAULT_TOWN),
       store: list => saveFavorites(DEFAULT_TOWN, list),
       carPoint: () => fromWorld(car.position),
-      streetHere: () => currentStreet(chunk.segments, car.position.x, car.position.z),
+      streetHere: () => currentStreet(tiles.segmentsNear(), car.position.x, car.position.z),
       onOpenChange: onDialogOpenChange,
-      goTo: favorite => {
+      goTo: async favorite => {
         const point = toWorld(favorite);
-        const road = findStart(chunk.segments, point);
-        const blocked = hitsVehicle(obstacles, point.x, point.z, road.heading, carModel.collision)
-          || outsideDepth(town.bbox, point.x, point.z) > 0;
+        await tiles.ensureLoaded(point); // load first, then place
+        const road = findStart(tiles.segmentsNear(point), point);
+        const blocked = hitsVehicle(tiles.obstaclesNear(point), point.x, point.z, road.heading, carModel.collision)
+          || outsideDepth(tiles.index.bbox, point.x, point.z) > 0;
         car.resetTo(blocked ? road : { x: point.x, z: point.z, heading: road.heading });
+        tiles.update(car.position);
         followCamera.jumpTo(car.position, car.heading);
       },
     });
@@ -145,7 +159,7 @@ async function main(): Promise<void> {
       if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen) {
         // Flips the saved building view; the dialog's Buildings choice stays the way to pick one explicitly.
         appearance = appearance === 'plain' ? 'realistic' : 'plain';
-        chunk.setAppearance(appearance);
+        tiles.setAppearance(appearance);
         saveSettings({ ...loadSettings(), appearance });
       }
       if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen) tooltip.close();
@@ -153,13 +167,14 @@ async function main(): Promise<void> {
 
     function tick(dt: number): void {
       perf.begin();
+      tiles.update(car.position);
       car.update(dt);
       stage.moveSunTo(car.position);
       speedDisplay.update(car.speed);
       followCamera.update(dt, car.position, car.heading);
       compass.update(car.heading);
       streetReadout.update(dt, car.position);
-      chunk.updateLabels(car.heading);
+      tiles.updateLabels(car.heading);
       renderer.render(scene, camera);
       tooltip.update(camera); // after render, which refreshes the camera matrices
       perf.end();

@@ -19,7 +19,7 @@ client/src/
   main.ts     loads the town, wires the modules, runs the frame loop
   api/        calls to the server
   scene/      renderer, camera, lights, ground
-  town/       roads, buildings, street labels, collision
+  town/       roads, buildings, street labels, collision, tileManager (loads and disposes tiles around the car)
   car/        car model and driving
   camera/     chase and top-down camera
   hud/        compass, speed, current street
@@ -38,6 +38,13 @@ data/         input files and scripts
 - `npm run dev` - run server and client with auto-reload, open http://localhost:5173
 - `npm run build` then `npm start` - run the built app, open http://localhost:3000
 - `npm run typecheck` - check types in all packages
+
+### tile streaming
+- The client fetches `/api/towns/:id/index` and keeps the 3 x 3 tiles around the car's tile loaded, which reaches 500 m past the car, beyond the 450 m fog.
+- Tiles more than 2 rings away are disposed, and in-flight requests for them are aborted.
+- At most 4 requests run at once, and one tile is built per frame. A failed request is retried after 1, 2 and 4 seconds.
+- Collision, the street name, the start point and picking use only the tiles around the car.
+- Set `TOWN_LOAD_MODE = 'whole'` in `client/src/config.ts` to load the whole town from `/api/towns/:id` instead.
 
 ### api
 - `GET /api/towns/:id` - a normalized town, e.g. `/api/towns/raw_min_tidhar2` reads `data/town_meters_raw_min_tidhar2.geojson`

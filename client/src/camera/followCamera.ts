@@ -14,14 +14,17 @@ export interface FollowCamera {
   setChaseOffset(offset: ChaseOffset): void;
   /** Snaps to the car instead of gliding there. */
   jumpTo(carPosition: THREE.Vector3, heading: number): void;
+  /** Raises the top-down height to clear a taller building. It never lowers, so the camera doesn't bob down. */
+  setTallestBuilding(height: number): void;
 }
 
 export function createFollowCamera(
   camera: THREE.PerspectiveCamera,
   startPosition: THREE.Vector3,
-  tallestBuilding: number,
+  initialTallestBuilding: number,
   occluders: THREE.Object3D[]
 ): FollowCamera {
+  let tallestBuilding = initialTallestBuilding;
   const collision = createCameraCollision(occluders);
   let mode = CHASE;
   let inputEnabled = true;
@@ -36,6 +39,9 @@ export function createFollowCamera(
   return {
     setInputEnabled(enabled) {
       inputEnabled = enabled;
+    },
+    setTallestBuilding(height) {
+      tallestBuilding = Math.max(tallestBuilding, height);
     },
     setChaseOffset(offset) {
       chase = offset;

@@ -51,7 +51,8 @@ export interface DialogValues {
 export interface SettingsDialogOptions {
   initial(): DialogValues;
   carPoint(): MapPoint;
-  preview(point: MapPoint): StartMatch;
+  /** Async, since the tiles around the point may have to load first. */
+  preview(point: MapPoint): Promise<StartMatch>;
   bounds: TownBounds;
   onOpenChange(open: boolean): void;
   /** Applies the values; returns false when they could not be stored. */
@@ -130,10 +131,32 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
       limitFactsLine.textContent = limitFacts(limit);
     }
     save.disabled = invalid || limit === null;
+    previewRequest++; // drops a lookup still running for an older point
     preview.replaceChildren();
     if (!point) return;
 
-    const match = options.preview(point);
+    void showPreview(point);
+  }
+
+  let previewRequest = 0;
+
+  async function showPreview(point: MapPoint): Promise<void> {
+    const request = ++previewRequest;
+    let settled = false;
+    const loading = setTimeout(() => { // only a slow lookup shows a message, so quick ones don't flicker
+      if (!settled && request === previewRequest) preview.replaceChildren(line('Finding the nearest road…'));
+    }, 150);
+    let match: StartMatch;
+    try {
+      match = await options.preview(point);
+    } catch {
+      return;
+    } finally {
+      settled = true;
+      clearTimeout(loading);
+    }
+    if (request !== previewRequest) return; // a newer point was typed meanwhile
+    preview.replaceChildren();
     const { x, z } = toWorld(point);
     const [minX, minY, maxX, maxY] = options.bounds;
     const outside = x < minX || x > maxX || z < -maxY || z > -minY;

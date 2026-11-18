@@ -15,11 +15,10 @@ export interface BuildingPicker {
 
 export function createBuildingPicker(
   camera: THREE.PerspectiveCamera,
-  targets: Map<THREE.Object3D, BuildingFeature>
+  targets: Map<THREE.Object3D, BuildingFeature> // read on every pick, since tiles come and go
 ): BuildingPicker {
   const raycaster = new THREE.Raycaster();
   raycaster.far = FOG_END;
-  const objects = [...targets.keys()];
   const pointer = new THREE.Vector2();
 
   return {
@@ -30,7 +29,7 @@ export function createBuildingPicker(
         -((clientY - rect.top) / rect.height) * 2 + 1
       );
       raycaster.setFromCamera(pointer, camera); // also sets the camera sprites need
-      const hit = raycaster.intersectObjects(objects, false)[0];
+      const hit = raycaster.intersectObjects([...targets.keys()], false)[0];
       return hit ? { feature: targets.get(hit.object)!, point: hit.point.clone() } : null;
     },
   };
