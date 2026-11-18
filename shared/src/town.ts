@@ -19,6 +19,34 @@ export interface Town extends Omit<FeatureCollection<Geometry, TownProperties>, 
   bbox: TownBounds;
 }
 
+/** One written tile, as listed in a town's tile index. */
+export interface TileEntry {
+  tx: number;
+  ty: number;
+  file: string;
+  buildings: number;
+  roads: number;
+  other: number;
+  bytes: number;
+}
+
+/** data/tiles/<town>/<town>_index.json: the town's grid and the tiles that have content. */
+export interface TileIndex {
+  town: string;
+  source: string;
+  units: 'meters';
+  origin: { lon: number; lat: number };
+  bbox: TownBounds;
+  tileSize: number;
+  grid: { minTx: number; maxTx: number; minTy: number; maxTy: number };
+  tiles: TileEntry[];
+}
+
+/** One tile: a Town holding only the tile's features, plus its grid position. */
+export interface TownTile extends Town {
+  tile: { tx: number; ty: number; size: number; bounds: TownBounds };
+}
+
 export interface ApiError {
   message: string;
 }

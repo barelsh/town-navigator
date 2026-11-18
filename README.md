@@ -41,6 +41,9 @@ data/         input files and scripts
 
 ### api
 - `GET /api/towns/:id` - a normalized town, e.g. `/api/towns/raw_min_tidhar2` reads `data/town_meters_raw_min_tidhar2.geojson`
+- `GET /api/towns/:id/index` - the town's tile index, e.g. `/api/towns/rosh_haayin/index` reads `data/tiles/rosh_haayin/rosh_haayin_index.json`: tile size, grid range, bbox and the list of non-empty tiles with their counts
+- `GET /api/towns/:id/tiles/:tx/:ty` - one tile, e.g. `/api/towns/rosh_haayin/tiles/-1/-1` reads `data/tiles/rosh_haayin/rosh_haayin_-1_-1.geojson`. 404 for tiles that are not in the index
+- Both are cached for 5 minutes. Generate the files with `npm run tile -- <town>`. `GET /api/towns/:id` still returns the whole town, for debugging.
 
 
 ### data
