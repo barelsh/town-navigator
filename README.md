@@ -39,10 +39,17 @@ data/         input files and scripts
 - `npm run build` then `npm start` - run the built app, open http://localhost:3000
 - `npm run typecheck` - check types in all packages
 
+### controls
+- `W` / `↑` accelerate, `S` / `↓` brake and reverse, `A` `D` / `←` `→` steer
+- `C` switch camera, click a building for details
+- `P` settings, `V` building view, `M` performance panel, `F` favorites
+- `B` tile map: a north-up map of the town's tile grid showing which tiles are loaded, loading, failed or not loaded, the 3 x 3 around the car and the car's heading. Driving input pauses while it is open.
+
 ### tile streaming
 - The client fetches `/api/towns/:id/index` and keeps the 3 x 3 tiles around the car's tile loaded, which reaches 500 m past the car, beyond the 450 m fog.
 - Tiles more than 2 rings away are disposed, and in-flight requests for them are aborted.
 - At most 4 requests run at once, and one tile is built per frame. A failed request is retried after 1, 2 and 4 seconds.
+- Press `B` to open the tile map and watch which tiles are loaded as the car drives.
 - Collision, the street name, the start point and picking use only the tiles around the car.
 - Set `TOWN_LOAD_MODE = 'whole'` in `client/src/config.ts` to load the whole town from `/api/towns/:id` instead.
 

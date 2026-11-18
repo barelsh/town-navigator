@@ -14,7 +14,7 @@
     A D / ← → steer · C switch camera<br />
     Click a building for details<br />
     <kbd>P</kbd> settings · <kbd>V</kbd> building view<br />
-    <kbd>M</kbd> performance panel · <kbd>F</kbd> favorites<br />
+    <kbd>M</kbd> performance panel · <kbd>F</kbd> favorites · <kbd>B</kbd> tile map<br />
     Speed: <span id="speed">0</span> km/h
   </div>
 
@@ -43,6 +43,13 @@
     <div class="tip-sub"><span class="swatch" id="tip-swatch"></span><span id="tip-group"></span><span id="tip-id"></span></div>
     <dl class="tip-facts" id="tip-facts"></dl>
     <dl class="tip-tags" id="tip-tags"></dl>
+  </div>
+
+  <div id="tile-map-wrap">
+    <button id="tile-map-button" type="button" aria-label="Tile map" aria-keyshortcuts="B" aria-describedby="tile-map-tip-label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg>
+    </button>
+    <span id="tile-map-tip-label" role="tooltip">Tile map <kbd>B</kbd></span>
   </div>
 
   <div id="favorites-wrap">
@@ -123,6 +130,21 @@
     </div>
     <ul class="fav-list" id="favorites-list"></ul>
     <p class="fav-note" id="favorites-note" hidden></p>
+  </dialog>
+
+  <dialog id="tile-map-dialog" aria-labelledby="tile-map-title">
+    <div class="dlg-head"><h3 id="tile-map-title">Town tiles</h3><button class="close" type="button" id="tile-map-close" aria-label="Close">×</button></div>
+    <p class="hint" id="tile-map-hint"></p>
+    <div class="map-wrap"><canvas id="tile-map-canvas" aria-label="Tile map"></canvas><div id="tile-map-tip" hidden></div></div>
+    <div class="tm-legend">
+      <span><i style="background:#ffd166"></i>loaded</span>
+      <span><i style="background:#1d222c;border:2px solid #ffd166"></i>loading</span>
+      <span><i style="background:#ff9c8a"></i>failed</span>
+      <span><i style="background:#3a414e"></i>not loaded</span>
+      <span><i style="border:1px dashed #a9b3bf"></i>town bounds</span>
+      <span><i style="border:1.5px dashed #fff"></i>3 × 3 around the car</span>
+    </div>
+    <div class="tm-foot" id="tile-map-foot"></div>
   </dialog>
 
   <script type="module" src="/src/main.ts"></script>

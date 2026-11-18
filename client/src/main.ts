@@ -12,6 +12,7 @@ import { createFavoritesDialog } from './hud/favoritesDialog.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
 import { createPerfMonitor } from './hud/perfMonitor.ts';
 import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
+import { createTileMap } from './hud/tileMap.ts';
 import { createStreetReadout } from './hud/streetReadout.ts';
 import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
@@ -145,6 +146,13 @@ async function main(): Promise<void> {
       },
     });
 
+    const tileMap = createTileMap({
+      tiles,
+      townId: DEFAULT_TOWN,
+      carPose: () => ({ x: car.position.x, z: car.position.z, heading: car.heading }),
+      onOpenChange: onDialogOpenChange,
+    });
+
     addEventListener('keydown', e => {
       const plainKey = !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(e.target);
       if (e.code === MONITORING_SHORTCUT && plainKey) {
@@ -156,13 +164,13 @@ async function main(): Promise<void> {
           saveSettings({ ...loadSettings(), monitoring: show }); // if storage fails the panel still toggles
         }
       }
-      if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen) {
+      if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) {
         // Flips the saved building view; the dialog's Buildings choice stays the way to pick one explicitly.
         appearance = appearance === 'plain' ? 'realistic' : 'plain';
         tiles.setAppearance(appearance);
         saveSettings({ ...loadSettings(), appearance });
       }
-      if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen) tooltip.close();
+      if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) tooltip.close();
     });
 
     function tick(dt: number): void {
