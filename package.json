@@ -17,7 +17,8 @@
     "build": "npm run build -w client",
     "start": "npm start -w server",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "normalize": "node data/scripts/normalize_coordinates.js"
+    "normalize": "node data/scripts/normalize_coordinates.js",
+    "tile": "node data/scripts/tile_town.js"
   },
   "devDependencies": {
     "concurrently": "^10.0.7",
