@@ -20,6 +20,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
 #compass svg { display: block; width: 92px; height: 92px; }
 #compass text { fill: #fff; font-size: 15px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
 #compass .north { fill: #ff6b5e; }
+#location {
+  display: grid; grid-template-columns: auto 1fr; gap: 0 6px;
+  margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font: 10.5px/1.35 ui-monospace, Menlo, monospace; color: #a9b3bf;
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+#location span:nth-child(odd) { text-align: left; opacity: 0.7; }
 
 #street {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 8px 18px;

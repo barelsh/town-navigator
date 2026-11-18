@@ -13,6 +13,7 @@ import { createSpeedDisplay } from './hud/speed.ts';
 import { createPerfMonitor } from './hud/perfMonitor.ts';
 import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
 import { createTileMap } from './hud/tileMap.ts';
+import { createLocationReadout } from './hud/location.ts';
 import { createStreetReadout } from './hud/streetReadout.ts';
 import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
@@ -60,6 +61,7 @@ async function main(): Promise<void> {
     tiles.onChange(() => followCamera.setTallestBuilding(tiles.tallestBuilding));
     const speedDisplay = createSpeedDisplay();
     const compass = createCompass();
+    const locationReadout = createLocationReadout();
     const streetReadout = createStreetReadout((x, z) => currentStreet(tiles.segmentsNear(), x, z));
 
     const tooltip = createBuildingTooltip();
@@ -182,6 +184,7 @@ async function main(): Promise<void> {
       followCamera.update(dt, car.position, car.heading);
       compass.update(car.heading);
       streetReadout.update(dt, car.position);
+      locationReadout.update(dt, car.position);
       tiles.updateLabels(car.heading);
       renderer.render(scene, camera);
       tooltip.update(camera); // after render, which refreshes the camera matrices

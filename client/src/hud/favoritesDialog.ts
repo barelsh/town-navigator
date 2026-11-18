@@ -1,5 +1,6 @@
 import { FAVORITES_SHORTCUT, FAVORITE_NAME_MAX, MAX_FAVORITES } from '../config.ts';
 import type { Favorite, MapPoint } from '../settings/settingsStore.ts';
+import { formatPlace, roundMeters } from './location.ts';
 import { isTyping } from './settingsDialog.ts';
 
 export interface FavoritesDialogOptions {
@@ -16,10 +17,6 @@ export interface FavoritesDialogOptions {
 export interface FavoritesDialog {
   readonly isOpen: boolean;
 }
-
-const round1 = (n: number) => Math.round(n * 10) / 10;
-const fmt = (n: number) => round1(n).toFixed(1);
-const place = (p: MapPoint) => `E ${fmt(p.x)} · N ${fmt(p.y)}`;
 
 function newId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -86,7 +83,7 @@ export function createFavoritesDialog(options: FavoritesDialogOptions): Favorite
       return;
     }
     const street = options.streetHere();
-    hint.textContent = `Saves where the car is now: ${street ? street + ', ' : ''}${place(options.carPoint())}`;
+    hint.textContent = `Saves where the car is now: ${street ? street + ', ' : ''}${formatPlace(options.carPoint())}`;
   }
 
   function renderRow(favorite: Favorite): HTMLElement {
@@ -152,7 +149,7 @@ export function createFavoritesDialog(options: FavoritesDialogOptions): Favorite
     }
     const pos = document.createElement('div');
     pos.className = 'fav-pos';
-    pos.textContent = place(favorite);
+    pos.textContent = formatPlace(favorite);
     main.append(pos);
 
     const rename = document.createElement('button');
@@ -226,7 +223,7 @@ export function createFavoritesDialog(options: FavoritesDialogOptions): Favorite
   saveButton.addEventListener('click', () => {
     if (list.length >= MAX_FAVORITES) return;
     const { x, y } = options.carPoint();
-    const favorite: Favorite = { id: newId(), name: defaultName(list, options.streetHere()), x: round1(x), y: round1(y) };
+    const favorite: Favorite = { id: newId(), name: defaultName(list, options.streetHere()), x: roundMeters(x), y: roundMeters(y) };
     list.unshift(favorite);
     removal = null;
     editingId = favorite.id; // opens in rename mode with the name selected
