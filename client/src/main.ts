@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     const tiles: TownTiles = streaming
       ? createTileManager(DEFAULT_TOWN, scene, kit, appearance, await fetchTileIndex(DEFAULT_TOWN))
       : createWholeTown(scene, kit, await fetchTown(DEFAULT_TOWN), appearance);
-    addGround(scene, tiles.index.bbox);
+    addGround(scene, renderer, tiles.index.bbox);
 
     const carModel = createCarModel(vehicleOf(settings));
     scene.add(carModel.group);

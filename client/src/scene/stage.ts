@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { TownBounds } from '@town-navigator/shared';
+import { addLawnPatches, GRASS_TILE, grassDetailTexture } from './grassTexture.ts';
 
 const SKY_COLOR = 0x9fd3ff;
 const SUN_OFFSET = new THREE.Vector3(100, 150, 62);
@@ -51,13 +52,18 @@ export function createStage(): Stage {
   };
 }
 
-export function addGround(scene: THREE.Scene, [minX, minY, maxX, maxY]: TownBounds): void {
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(maxX - minX + GROUND_MARGIN, maxY - minY + GROUND_MARGIN),
-    new THREE.MeshLambertMaterial({ color: 0x6fae4f })
-  );
+export function addGround(
+  scene: THREE.Scene, renderer: THREE.WebGLRenderer, [minX, minY, maxX, maxY]: TownBounds
+): void {
+  const width = maxX - minX + GROUND_MARGIN, depth = maxY - minY + GROUND_MARGIN;
+  const centerX = (minX + maxX) / 2, centerZ = -(minY + maxY) / 2;
+  const map = grassDetailTexture(renderer.capabilities.getMaxAnisotropy());
+  map.repeat.set(width / GRASS_TILE, depth / GRASS_TILE);
+  const material = new THREE.MeshLambertMaterial({ map });
+  addLawnPatches(material);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), material);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set((minX + maxX) / 2, 0, -(minY + maxY) / 2);
+  ground.position.set(centerX, 0, centerZ);
   ground.receiveShadow = true;
   scene.add(ground);
 }
