@@ -190,6 +190,7 @@ export function addRoads(
     meshes.push(centerLines);
   }
   labels.setHeight(lineY + ROAD_RANK_GAP);
+  labels.finish();
 
   return {
     segments,

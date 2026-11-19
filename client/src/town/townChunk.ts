@@ -15,7 +15,7 @@ export interface TownKit {
   schools: SchoolFacadeKit;
   buildings: BuildingMaterialKit; // vertex-colored materials shared by all merged buildings
   roads: RoadKit;   // surface material per color, center line material
-  labels: LabelKit; // label material per street name, shared plane
+  labels: LabelKit; // renderer and a measuring context; each chunk draws its own label atlas
 }
 
 /** A set of features built into one group, with the data the game reads from it. Can be disposed. */
