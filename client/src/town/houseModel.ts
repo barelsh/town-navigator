@@ -20,8 +20,8 @@ const MIN_WINDOW_WALL = 2.2; // shorter walls stay plain plaster
 const ROOF_COLORS = [0xe67a3c, 0xd96c32, 0xee8c4e, 0xcf6530];
 const DUPLEX_ROOF_COLORS = [0x8a9096, 0x7b8187, 0x969ba0, 0x6f757b];
 const WALL_COLORS = [0xf6f0e4, 0xefe6d6, 0xf8f5ee];
-const WALL_LIFT = 0.42; // the game's lights leave vertical walls dim
-const ROOF_LIFT = 0.2;  // keeps tiles orange rather than brown
+export const WALL_LIFT = 0.42; // the game's lights leave vertical walls dim
+export const ROOF_LIFT = 0.2;  // keeps tiles orange rather than brown
 
 const GROUP_ROOF = 0, GROUP_WINDOWS = 1, GROUP_PLASTER = 2;
 
@@ -172,7 +172,7 @@ function canvasTexture(width: number, height: number,
 }
 
 // Light staggered tile courses, tinted by the material color.
-function roofTexture(): THREE.CanvasTexture {
+export function roofTexture(): THREE.CanvasTexture {
   return canvasTexture(512, 512, (c, s) => {
     let seed = 23;
     const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -193,7 +193,7 @@ function roofTexture(): THREE.CanvasTexture {
 }
 
 // Two bays side by side, 6 m wide and one wall high: one window open, one with its shutter half down.
-function windowTexture(floorLine: boolean): THREE.CanvasTexture {
+export function windowTexture(floorLine: boolean): THREE.CanvasTexture {
   return canvasTexture(1024, 512, (c, w, h) => {
     c.fillStyle = '#fff';
     c.fillRect(0, 0, w, h);
@@ -218,32 +218,16 @@ function windowTexture(floorLine: boolean): THREE.CanvasTexture {
   });
 }
 
-type HouseMaterials = [roof: THREE.MeshLambertMaterial, windows: THREE.MeshLambertMaterial, plaster: THREE.MeshLambertMaterial];
-
 type HouseKind = 'house' | 'duplex';
 
-let sharedTextures: { roof: THREE.CanvasTexture; windows: THREE.CanvasTexture; duplexWindows: THREE.CanvasTexture } | null = null;
-const houseMaterialSets = new Map<string, HouseMaterials>(); // shared per roof and wall color
-
-/** Materials in the order of the geometry's groups: roof, windows, plaster. */
-export function houseMaterials(id: string, kind: HouseKind = 'house'): HouseMaterials {
-  sharedTextures ??= { roof: roofTexture(), windows: windowTexture(false), duplexWindows: windowTexture(true) };
+/** Roof and wall colors of a house, from the id alone so a house keeps them whatever order tiles load in. */
+export function houseColors(id: string, kind: HouseKind = 'house'): { roof: THREE.Color; wall: THREE.Color } {
   const hash = hashId(id);
   const roofColors = kind === 'duplex' ? DUPLEX_ROOF_COLORS : ROOF_COLORS;
-  const roofColor = roofColors[hash % roofColors.length];
-  const windowMap = kind === 'duplex' ? sharedTextures.duplexWindows : sharedTextures.windows;
-  const wallColor = WALL_COLORS[(hash >>> 8) % WALL_COLORS.length];
-  const key = `${kind}-${roofColor}-${wallColor}`;
-  let set = houseMaterialSets.get(key);
-  if (!set) {
-    const roofMap = sharedTextures.roof.clone();
-    roofMap.needsUpdate = true;
-    set = [
-      new THREE.MeshLambertMaterial({ color: roofColor, map: roofMap, emissive: roofColor, emissiveMap: roofMap, emissiveIntensity: ROOF_LIFT }),
-      new THREE.MeshLambertMaterial({ color: wallColor, map: windowMap, emissive: wallColor, emissiveMap: windowMap, emissiveIntensity: WALL_LIFT }),
-      new THREE.MeshLambertMaterial({ color: wallColor, emissive: wallColor, emissiveIntensity: WALL_LIFT }),
-    ];
-    houseMaterialSets.set(key, set);
-  }
-  return set;
+  return {
+    roof: new THREE.Color(roofColors[hash % roofColors.length]),
+    wall: new THREE.Color(WALL_COLORS[(hash >>> 8) % WALL_COLORS.length]),
+  };
 }
+
+export const duplexWindowTexture = () => windowTexture(true);

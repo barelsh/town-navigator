@@ -3,7 +3,9 @@ import type { Position } from 'geojson';
 import type { BuildingFeature, TownFeature } from '@town-navigator/shared';
 import { MIN_FACADE_FLOORS, type ApartmentFacadeKit } from './apartmentFacade.ts';
 import { floorCount, hashId } from './facadeKit.ts';
-import { createHouseGeometry, houseMaterials, houseFloors } from './houseModel.ts';
+import { createBuildingBatch } from './buildingBatch.ts';
+import type { BuildingMaterialKit } from './buildingMaterials.ts';
+import { createHouseGeometry, houseColors, houseFloors } from './houseModel.ts';
 import type { SchoolFacadeKit } from './schoolFacade.ts';
 import { buildingGroup, buildingHeight, buildingIcon, GROUP_COLORS, ROOF_SHADE, UNKNOWN_SHADES } from './buildingStyles.ts';
 import type { Obstacle } from './collision.ts';
@@ -13,22 +15,13 @@ const ICON_SIZE = 10;       // meters
 const ICON_CLEARANCE = 2;   // meters above the roof
 const ICON_CANVAS = 128;    // pixels
 
-type BuildingMaterials = [roof: THREE.MeshLambertMaterial, wall: THREE.MeshLambertMaterial];
-
-const buildingMaterials = new Map<number, BuildingMaterials>(); // shared per color
 const iconMaterials = new Map<string, THREE.SpriteMaterial>();  // shared per icon
+const PROXY_MATERIAL = new THREE.MeshBasicMaterial(); // never drawn: proxies are invisible and only raycast
+const WHITE = new THREE.Color(1, 1, 1);
 
-function materialsFor(color: THREE.Color): BuildingMaterials {
-  const key = color.getHex();
-  let materials = buildingMaterials.get(key);
-  if (!materials) {
-    materials = [
-      new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(ROOF_SHADE) }),
-      new THREE.MeshLambertMaterial({ color }),
-    ];
-    buildingMaterials.set(key, materials);
-  }
-  return materials;
+/** Roof and wall vertex colors of a plain block. */
+function blockColors(color: THREE.Color): [roof: THREE.Color, wall: THREE.Color] {
+  return [color.clone().multiplyScalar(ROOF_SHADE), color];
 }
 
 function iconMaterial(icon: string): THREE.SpriteMaterial {
@@ -75,10 +68,10 @@ const isBuilding = (feature: TownFeature): feature is BuildingFeature =>
 
 export type Appearance = 'realistic' | 'plain';
 
-interface AppearanceSwap {
-  mesh: THREE.Mesh;
-  plain: { geometry: THREE.BufferGeometry; material: THREE.Material[] };
-  realistic: { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[] };
+interface ProxySwap {
+  proxy: THREE.Mesh;
+  plain: THREE.BufferGeometry;
+  realistic: THREE.BufferGeometry;
 }
 
 export interface Buildings {
@@ -95,7 +88,7 @@ export interface Buildings {
 export function addBuildings(
   parent: THREE.Object3D,
   features: TownFeature[],
-  kit: { apartments: ApartmentFacadeKit; schools: SchoolFacadeKit },
+  kit: { apartments: ApartmentFacadeKit; schools: SchoolFacadeKit; buildings: BuildingMaterialKit },
   appearance: Appearance,
 ): Buildings {
   const obstacles: Obstacle[] = [];
@@ -105,7 +98,14 @@ export function addBuildings(
   const schools = kit.schools.begin();
   const realisticParts = new THREE.Group(); // every facade part, hidden as one in the plain view
   parent.add(realisticParts);
-  const swaps: AppearanceSwap[] = [];
+  const swaps: ProxySwap[] = [];
+  // Merged meshes per material: always visible, realistic view only, plain view only.
+  const shared = createBuildingBatch(), realisticBatch = createBuildingBatch(), plainBatch = createBuildingBatch();
+  const realisticGroup = new THREE.Group(), plainGroup = new THREE.Group(), sharedGroup = new THREE.Group();
+  parent.add(sharedGroup, realisticGroup, plainGroup);
+  const mergedMeshes: THREE.Mesh[] = [];
+  const mats = kit.buildings;
+  const blockMaterials = [mats.blockRoof, mats.blockWall];
   const geometries = new Set<THREE.BufferGeometry>(); // everything this call created, for dispose
   const objects: THREE.Object3D[] = [];
   let facadeMeshes: THREE.InstancedMesh[] = [];
@@ -130,26 +130,30 @@ export function addBuildings(
     // From the id alone, so a building keeps its shade whatever order buildings load in.
     const shade = group === 'unknown' ? UNKNOWN_SHADES[hashId(featureId) % UNKNOWN_SHADES.length] : 1;
     const color = new THREE.Color(GROUP_COLORS[group]).multiplyScalar(shade);
-    const [roof, wall] = materialsFor(color);
+    const [roofColor, wallColor] = blockColors(color);
     const floors = floorCount(feature.properties, height);
     const hasFacade = feature.properties.building === 'apartments' && floors >= MIN_FACADE_FLOORS;
     const isSchool = feature.properties.building === 'school';
-    const wallMaterial = isSchool ? kit.schools.wallMaterial : hasFacade ? kit.apartments.wallMaterial : wall;
-    const realisticMaterial = house
-      ? houseMaterials(featureId, houseFloorCount > 1 ? 'duplex' : 'house')
-      : [roof, wallMaterial];
-    const mesh = new THREE.Mesh(geometry, realisticMaterial);
-    mesh.castShadow = mesh.receiveShadow = true;
+    const wallMaterial = isSchool ? kit.schools.wallMaterial : hasFacade ? kit.apartments.wallMaterial : null;
+    if (house) {
+      const c = houseColors(featureId, houseFloorCount > 1 ? 'duplex' : 'house');
+      const windows = houseFloorCount > 1 ? mats.duplexWindows : mats.houseWindows;
+      realisticBatch.add(geometry, [mats.houseRoof, windows, mats.housePlaster], [c.roof, c.wall, c.wall]);
+      plainBatch.add(plainGeometry, blockMaterials, [roofColor, wallColor]);
+    } else if (wallMaterial) {
+      realisticBatch.add(plainGeometry, [mats.blockRoof, wallMaterial], [roofColor, WHITE]);
+      plainBatch.add(plainGeometry, blockMaterials, [roofColor, wallColor]);
+    } else {
+      shared.add(plainGeometry, blockMaterials, [roofColor, wallColor]);
+    }
+
+    // Hidden stand-in for clicks and camera collision; three.js raycasts invisible meshes.
+    const mesh = new THREE.Mesh(wallMaterial || house ? geometry : plainGeometry, PROXY_MATERIAL);
+    mesh.visible = false;
     parent.add(mesh);
     objects.push(mesh);
     pickTargets.set(mesh, feature);
-    if (house) {
-      swaps.push({ mesh, plain: { geometry: plainGeometry, material: [roof, wall] }, realistic: { geometry, material: realisticMaterial } });
-    } else {
-      if (wallMaterial !== wall) {
-        swaps.push({ mesh, plain: { geometry: plainGeometry, material: [roof, wall] }, realistic: { geometry, material: realisticMaterial } });
-      }
-    }
+    if (house || wallMaterial) swaps.push({ proxy: mesh, plain: plainGeometry, realistic: geometry });
 
     if (hasFacade) facades.add(featureId, ring, height, floors);
     if (isSchool) schools.add(featureId, ring, height, floors);
@@ -168,16 +172,14 @@ export function addBuildings(
       pickTargets.set(sprite, feature);
     }
   }
+  mergedMeshes.push(...shared.finish(sharedGroup), ...realisticBatch.finish(realisticGroup), ...plainBatch.finish(plainGroup));
   facadeMeshes = [...facades.finish(realisticParts).meshes, ...schools.finish(realisticParts).meshes];
 
   function setAppearance(appearance: Appearance): void {
     const realistic = appearance === 'realistic';
-    realisticParts.visible = realistic;
-    for (const { mesh, plain, realistic: model } of swaps) {
-      const choice = realistic ? model : plain;
-      mesh.geometry = choice.geometry;
-      mesh.material = choice.material;
-    }
+    realisticParts.visible = realisticGroup.visible = realistic;
+    plainGroup.visible = !realistic;
+    for (const { proxy, plain, realistic: model } of swaps) proxy.geometry = realistic ? model : plain;
   }
 
   setAppearance(appearance); // before the first frame
@@ -187,6 +189,8 @@ export function addBuildings(
     if (disposed) return;
     disposed = true;
     realisticParts.removeFromParent();
+    for (const group of [sharedGroup, realisticGroup, plainGroup]) group.removeFromParent();
+    for (const mesh of mergedMeshes) mesh.geometry.dispose();
     for (const object of objects) object.removeFromParent();
     for (const mesh of facadeMeshes) mesh.dispose(); // the shared unit box and the materials stay
     for (const geometry of geometries) geometry.dispose(); // both sides of each appearance swap

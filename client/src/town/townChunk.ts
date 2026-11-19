@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { BuildingFeature, TownFeature } from '@town-navigator/shared';
 import { createApartmentFacadeKit, type ApartmentFacadeKit } from './apartmentFacade.ts';
+import { createBuildingMaterialKit, type BuildingMaterialKit } from './buildingMaterials.ts';
 import { addBuildings, type Appearance } from './buildings.ts';
 import type { Obstacle } from './collision.ts';
 import { addRoads, createRoadKit, type RoadKit, type StreetSegment } from './roads.ts';
@@ -12,6 +13,7 @@ export interface TownKit {
   renderer: THREE.WebGLRenderer;
   apartments: ApartmentFacadeKit;
   schools: SchoolFacadeKit;
+  buildings: BuildingMaterialKit; // vertex-colored materials shared by all merged buildings
   roads: RoadKit;   // surface material per color, center line material
   labels: LabelKit; // label material per street name, shared plane
 }
@@ -35,6 +37,7 @@ export function createTownKit(renderer: THREE.WebGLRenderer): TownKit {
     renderer,
     apartments: createApartmentFacadeKit(),
     schools: createSchoolFacadeKit(),
+    buildings: createBuildingMaterialKit(),
     roads: createRoadKit(),
     labels: createLabelKit(renderer),
   };
