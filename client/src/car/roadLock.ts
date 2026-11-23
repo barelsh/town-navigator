@@ -30,6 +30,21 @@ export interface DriveGuide {
   observe(pose: Pose, speed: number, dt: number): void;
 }
 
+/** Fields of `RoadLock.inspect`, for the debug log. Numbers only, so a recorder can reuse one object per frame. */
+export interface LockSnapshot {
+  active: number; mode: number; hold: number;     // 0 / 1; mode 1 is free
+  candHeading: number; candFlow: number;           // NaN / 0 when none; flow 1 both, 2 out
+  zoneX: number; zoneZ: number; zoneR: number;     // the zone a free car is in; 0 when locked
+  trackAx: number; trackAz: number; trackBx: number; trackBz: number; trackT: number; trackDir: number;
+  heading: number; lateral: number; offLen: number; ease: number;
+  lastZoneR: number;
+}
+
+export interface RoadLockOptions {
+  /** Called at engage, disengage, zone capture, exit and the like, for the debug log. */
+  onEvent?(kind: string, data: Record<string, number | string | null>): void;
+}
+
 export interface RoadLock {
   readonly active: boolean;
   readonly mode: 'locked' | 'free';
@@ -43,11 +58,13 @@ export interface RoadLock {
   reset(pose: Pose, graph: RoadGraph): Pose | null;
   step(pose: Pose, speed: number, dt: number, graph: RoadGraph): Pose & { speed: number };
   observe(pose: Pose, speed: number, dt: number, graph: RoadGraph): void;
+  /** Fills `out` with the lock's internal state. Allocates nothing. */
+  inspect(out: LockSnapshot): void;
 }
 
 export const LANE_OFFSET = 1.75;     // m right of the center line, at most
 export const EASE = 0.15;            // s: time constant of the heading and the lane offset
-export const ENTER_LOOKAHEAD = 0.3;  // s of speed added to a zone's radius when entering it
+export const ENTER_LOOKAHEAD = 0.3;  // s of speed: a zone catches the car when its road reaches the zone's edge within this
 export const EXIT_MARGIN = 1;        // m past the radius before a free car counts as out
 export const EXIT_CONE = (100 * Math.PI) / 180; // an exit must be within this of the direction of travel
 export const SNAP_EASE = 0.3;        // s: time constant of a snap onto an exit's road ...
@@ -168,6 +185,24 @@ export function applyHold(hold: Hold, before: { x: number; z: number }, after: {
   return { x: hold.x + dx * limit / distance, z: hold.z + dz * limit / distance, held: true };
 }
 
+/** Meters along the walked road (stretches of x0, z0, x1, z1) until it first reaches the zone's circle; 0 if it starts inside. */
+function distanceToEdge(walked: number[], zone: Zone): number {
+  let along = 0;
+  for (let i = 0; i < walked.length; i += 4) {
+    const dx = walked[i + 2] - walked[i], dz = walked[i + 3] - walked[i + 1], length = Math.hypot(dx, dz);
+    const ox = walked[i] - zone.x, oz = walked[i + 1] - zone.z;
+    const c = ox * ox + oz * oz - zone.radius * zone.radius;
+    if (c <= 0) return along;
+    const a = length * length, b = 2 * (dx * ox + dz * oz), discriminant = b * b - 4 * a * c;
+    if (a > 0 && discriminant >= 0) {
+      const u = (-b - Math.sqrt(discriminant)) / (2 * a);
+      if (u >= 0 && u <= 1) return along + u * length;
+    }
+    along += length;
+  }
+  return Infinity; // not reached: the member node is inside the circle
+}
+
 // Zones by the nodes of their members, per graph, to tell quickly whether a road runs into one.
 const zoneNodeCache = new WeakMap<RoadGraph, Map<number, Zone>>();
 function zoneNodes(graph: RoadGraph): Map<number, Zone> {
@@ -180,7 +215,8 @@ function zoneNodes(graph: RoadGraph): Map<number, Zone> {
   return nodes;
 }
 
-export function createRoadLock(): RoadLock {
+export function createRoadLock(options: RoadLockOptions = {}): RoadLock {
+  const emit = options.onEvent;
   let active = false;
   let track: Track | null = null;
   let heading = 0;  // eased
@@ -286,21 +322,30 @@ export function createRoadLock(): RoadLock {
     return true;
   }
 
-  /** The first zone the car's own road runs into, ahead in the direction it is moving. */
-  function zoneAhead(graph: RoadGraph, reversing: boolean): Zone | null {
+  /**
+   * The first zone the car's own road runs into, ahead in the direction it is moving, and how far along that road
+   * the car is from the zone's edge. That distance, not the straight-line one, decides when the zone catches the car:
+   * a road that leaves a zone and loops back to it is a long way from the edge while the car drives away.
+   */
+  function zoneAhead(graph: RoadGraph, reversing: boolean): { zone: Zone; enter: number } | null {
     const nodes = zoneNodes(graph);
     let current = track!;
+    let x = current.ax + current.ux * current.t, z = current.az + current.uz * current.t; // the car on its road's center line
+    const walked: number[] = []; // x0, z0, x1, z1 of each stretch of road walked
     let travelled = 0;
     for (let hop = 0; hop < MAX_HOPS && travelled < HORIZON; hop++) {
       const toB = current.dir * (reversing ? -1 : 1) > 0;
-      travelled += toB ? current.length - current.t : current.t;
       const px = toB ? current.bx : current.ax, pz = toB ? current.bz : current.az;
+      walked.push(x, z, px, pz);
+      travelled += Math.hypot(px - x, pz - z);
       const found = nodes.get(nodeKey(px, pz));
-      if (found) return found;
+      if (found) return { zone: found, enter: distanceToEdge(walked, found) };
       const next = choose(graph, current, px, pz, toB ? current.ux : -current.ux, toB ? current.uz : -current.uz, reversing);
       if (!next) return null;
       const moveDir = next.end === 0 ? 1 : -1;
       current = trackOf(next.segment, reversing ? -moveDir as 1 | -1 : moveDir as 1 | -1, next.end === 0 ? 0 : lengthOf(next.segment));
+      x = px;
+      z = pz;
     }
     return null;
   }
@@ -311,13 +356,37 @@ export function createRoadLock(): RoadLock {
     get hold() { return hold; },
     candidate: () => candidate,
 
+    inspect(out) {
+      out.active = active ? 1 : 0;
+      out.mode = mode === 'free' ? 1 : 0;
+      out.hold = hold ? 1 : 0;
+      out.candHeading = candidate ? candidate.heading : NaN;
+      out.candFlow = candidate ? (candidate.flow === 'both' ? 1 : candidate.flow === 'out' ? 2 : 3) : 0;
+      out.zoneX = zone ? zone.x : 0;
+      out.zoneZ = zone ? zone.z : 0;
+      out.zoneR = zone ? zone.radius : 0;
+      out.trackAx = track ? track.ax : NaN;
+      out.trackAz = track ? track.az : NaN;
+      out.trackBx = track ? track.bx : NaN;
+      out.trackBz = track ? track.bz : NaN;
+      out.trackT = track ? track.t : NaN;
+      out.trackDir = track ? track.dir : 0;
+      out.heading = heading;
+      out.lateral = lateral;
+      out.offLen = Math.hypot(offX, offZ);
+      out.ease = ease;
+      out.lastZoneR = lastZone ? lastZone.radius : 0;
+    },
+
     engage(pose, graph) {
       const snapped = seed(pose, graph);
       active = snapped !== null;
+      emit?.('engage', { ok: active ? 1 : 0, x: pose.x, z: pose.z, heading: pose.heading, snapX: snapped?.x ?? null, snapZ: snapped?.z ?? null });
       return snapped;
     },
 
     disengage() {
+      emit?.('disengage', { mode });
       active = false;
       track = null;
       lastZone = null;
@@ -327,7 +396,9 @@ export function createRoadLock(): RoadLock {
     },
 
     reset(pose, graph) {
-      return active ? seed(pose, graph) : null;
+      const snapped = active ? seed(pose, graph) : null;
+      if (active) emit?.('reset', { x: pose.x, z: pose.z, snapX: snapped?.x ?? null, snapZ: snapped?.z ?? null });
+      return snapped;
     },
 
     step(pose, speed, dt, graph) {
@@ -347,13 +418,23 @@ export function createRoadLock(): RoadLock {
 
       // A zone just left can't capture the car again until it is a little way outside it.
       if (lastZone && Math.hypot(result.x - lastZone.x, result.z - lastZone.z) > lastZone.radius + REARM_DISTANCE) lastZone = null;
-      // Enter a zone only if this car's own road runs into it, once within its radius plus a lookahead,
-      // so a fast car still has room to steer.
+      // Enter a zone only if this car's own road runs into it, once it is within a lookahead of the zone's edge,
+      // so a fast car still has room to steer. The distance along the road ahead and the car's own straight-line
+      // distance must both be within the lookahead. The straight line alone would catch a car driving away on a road
+      // that loops back to the zone. The road alone judges by the car's place on its road, which is not where the car
+      // is while a snap is still easing, and that place can lie in another zone the car isn't near.
       const ahead = zoneAhead(graph, reversing);
-      if (ahead && !(lastZone && Math.hypot(ahead.x - lastZone.x, ahead.z - lastZone.z) < 0.5)
-        && Math.hypot(result.x - ahead.x, result.z - ahead.z) <= ahead.radius + Math.abs(speed) * ENTER_LOOKAHEAD) {
+      const lookahead = Math.abs(speed) * ENTER_LOOKAHEAD;
+      if (ahead && !(lastZone && Math.hypot(ahead.zone.x - lastZone.x, ahead.zone.z - lastZone.z) < 0.5)
+        && ahead.enter <= lookahead
+        && Math.hypot(result.x - ahead.zone.x, result.z - ahead.zone.z) <= ahead.zone.radius + lookahead) {
+        emit?.('capture', {
+          zoneX: ahead.zone.x, zoneZ: ahead.zone.z, zoneR: ahead.zone.radius, members: ahead.zone.members.length,
+          enter: ahead.enter, lookahead, carDist: Math.hypot(result.x - ahead.zone.x, result.z - ahead.zone.z),
+          speed, offLen: Math.hypot(offX, offZ), lastZoneR: lastZone ? lastZone.radius : null,
+        });
         mode = 'free';
-        zone = ahead;
+        zone = ahead.zone;
         zoneGraph = graph;
         hold = undefined;
         candidate = null;
@@ -372,6 +453,7 @@ export function createRoadLock(): RoadLock {
           if (d < nearest) { nearest = d; same = z; }
         }
         if (!same) { // gone: snap to the nearest road, easing in
+          emit?.('zoneGone', { zoneX: zone.x, zoneZ: zone.z, zoneR: zone.radius });
           const hit = nearestRoad(graph.segments, pose);
           if (hit) lockOnto(trackOf(hit.segment, Math.sin(pose.heading) * (hit.segment.bx - hit.segment.ax) + Math.cos(pose.heading) * (hit.segment.bz - hit.segment.az) >= 0 ? 1 : -1, hit.t), pose, SNAP_EASE);
           else clearZone();
@@ -394,8 +476,13 @@ export function createRoadLock(): RoadLock {
       const edge = candidate.edgePoint!;
       const nearest = graph.nearestOnSegment(candidate.segment!, edge.x, edge.z);
       const dir: 1 | -1 = speed >= 0 ? candidate.dir! : (-candidate.dir! as 1 | -1);
-      lastZone = { x: zone.x, z: zone.z, radius: zone.radius };
+      const left = zone, taken = candidate; // lockOnto clears both
+      lastZone = { x: left.x, z: left.z, radius: left.radius };
       lockOnto(trackOf(segment, dir, nearest.t), pose, SNAP_EASE);
+      emit?.('exit', {
+        zoneX: left.x, zoneZ: left.z, zoneR: left.radius, out: Math.hypot(dx, dz), speed,
+        travel, candHeading: taken.heading, candFlow: taken.flow, snapDistance: Math.hypot(offX, offZ),
+      });
     },
   };
 }

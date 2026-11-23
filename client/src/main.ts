@@ -4,7 +4,8 @@ import { fetchTileIndex, fetchTown } from './api/townApi.ts';
 import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
-import { createRoadLock } from './car/roadLock.ts';
+import { createRoadLock, type LockSnapshot } from './car/roadLock.ts';
+import { createDebugLog } from './debug/debugLog.ts';
 import { chaseOffset } from './car/vehicles.ts';
 import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT, ROAD_LOCK_SHORTCUT, TOWN_LOAD_MODE } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
   try {
     const stage = createStage();
     const { renderer, scene, camera } = stage;
+    const debugLog = import.meta.env.DEV ? createDebugLog() : null; // flight recorder: press L to save it to logs/
 
     const settings = loadSettings();
     const perf = createPerfMonitor(renderer);
@@ -41,6 +43,7 @@ async function main(): Promise<void> {
     const setMonitoring = (visible: boolean) => {
       perf.setVisible(visible);
       junctionDebug.setVisible(visible);
+      debugLog?.event('monitoring', { on: visible });
     };
     setMonitoring(monitoringEnabled(settings));
     let appearance = appearanceOf(settings);
@@ -56,14 +59,25 @@ async function main(): Promise<void> {
     scene.add(carModel.group);
     const target = toWorld(townSettings(settings, DEFAULT_TOWN).startPoint);
     await tiles.ensureLoaded(target); // the 3 x 3 around the start point, before the first frame
-    const roadLock = createRoadLock();
+    // The road graph around the car. Rebuilt when the nearby tiles change, so a rebuild is logged with how long it took.
+    let lastGraph: ReturnType<typeof tiles.roadGraphNear> | null = null;
+    const graphNear = () => {
+      const started = performance.now();
+      const graph = tiles.roadGraphNear();
+      if (graph !== lastGraph) {
+        lastGraph = graph;
+        debugLog?.event('graph', { ms: +(performance.now() - started).toFixed(2), segments: graph.segments.length, zones: graph.zones.length });
+      }
+      return graph;
+    };
+    const roadLock = createRoadLock({ onEvent: debugLog ? (kind, data) => debugLog.event(`lock.${kind}`, data) : undefined });
     const car = createCarController(carModel, findStart(tiles.segmentsNear(target), target), (x, z, heading) =>
       Math.max(vehicleOverlap(tiles.obstaclesNear(), x, z, heading, carModel.collision), outsideDepth(tiles.index.bbox, x, z)), {
       get active() { return roadLock.active; },
       get mode() { return roadLock.mode; },
       get hold() { return roadLock.hold; },
-      step: (pose, speed, dt) => roadLock.step(pose, speed, dt, tiles.roadGraphNear()),
-      observe: (pose, speed, dt) => roadLock.observe(pose, speed, dt, tiles.roadGraphNear()),
+      step: (pose, speed, dt) => roadLock.step(pose, speed, dt, graphNear()),
+      observe: (pose, speed, dt) => roadLock.observe(pose, speed, dt, graphNear()),
     });
     tiles.update(car.position);
 
@@ -73,6 +87,12 @@ async function main(): Promise<void> {
     followCamera.setChaseOffset(chaseOffset(carModel.spec));
     followCamera.jumpTo(car.position, car.heading);
     tiles.onChange(() => followCamera.setTallestBuilding(tiles.tallestBuilding));
+    tiles.onChange(() => {
+      if (!debugLog) return;
+      const counts = { loaded: 0, loading: 0, failed: 0 };
+      for (const state of tiles.statuses().values()) counts[state]++;
+      debugLog.event('tiles', counts);
+    });
     const speedDisplay = createSpeedDisplay();
 
     // --- Stick to roads
@@ -88,7 +108,7 @@ async function main(): Promise<void> {
     function setRoadLock(on: boolean, { announce = false, quiet = false } = {}): boolean {
       if (on === roadLock.active) return on;
       if (on) {
-        const snapped = roadLock.engage(carPose(), tiles.roadGraphNear());
+        const snapped = roadLock.engage(carPose(), graphNear());
         if (snapped) car.setPose(snapped.x, snapped.z, snapped.heading); // a few meters at most; the camera follows
         else if (!quiet) toast('No road nearby: Stick to roads stays off');
       } else {
@@ -100,7 +120,7 @@ async function main(): Promise<void> {
     }
     /** After a teleport: puts the car back on the road it landed near. */
     function reseedRoadLock(): void {
-      const snapped = roadLock.reset(carPose(), tiles.roadGraphNear());
+      const snapped = roadLock.reset(carPose(), graphNear());
       if (snapped) car.setPose(snapped.x, snapped.z, snapped.heading);
     }
     setRoadLock(roadLockOf(settings), { quiet: true });
@@ -137,6 +157,7 @@ async function main(): Promise<void> {
       bounds: tiles.index.bbox,
       onOpenChange: open => onDialogOpenChange(open),
       onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring, roadLock: wantsRoadLock }) => {
+        debugLog?.event('settingsSaved', { startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring, roadLock: wantsRoadLock });
         const latest = loadSettings();
         const previous = townSettings(latest, DEFAULT_TOWN).startPoint;
         latest.towns[DEFAULT_TOWN] = { ...latest.towns[DEFAULT_TOWN], startPoint };
@@ -174,6 +195,7 @@ async function main(): Promise<void> {
     });
 
     const onDialogOpenChange = (open: boolean) => {
+      debugLog?.event('dialog', { open });
       car.setInputEnabled(!open);
       followCamera.setInputEnabled(!open);
     };
@@ -185,6 +207,7 @@ async function main(): Promise<void> {
       streetHere: () => currentStreet(tiles.segmentsNear(), car.position.x, car.position.z),
       onOpenChange: onDialogOpenChange,
       goTo: async favorite => {
+        debugLog?.event('goTo', { favorite: favorite.name, x: favorite.x, y: favorite.y });
         const point = toWorld(favorite);
         await tiles.ensureLoaded(point); // load first, then place
         const road = findStart(tiles.segmentsNear(point), point);
@@ -215,6 +238,7 @@ async function main(): Promise<void> {
           saveSettings({ ...loadSettings(), monitoring: show }); // if storage fails the panel still toggles
         }
       }
+      if (e.code === 'KeyL' && plainKey && debugLog) void saveDebugLog();
       if (e.code === ROAD_LOCK_SHORTCUT && plainKey) {
         if (settingsDialog.isOpen) {
           settingsDialog.toggleRoadLock(); // applies on Save, like the other fields
@@ -226,30 +250,87 @@ async function main(): Promise<void> {
       if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) {
         // Flips the saved building view; the dialog's Buildings choice stays the way to pick one explicitly.
         appearance = appearance === 'plain' ? 'realistic' : 'plain';
+        debugLog?.event('appearance', { appearance });
         tiles.setAppearance(appearance);
         saveSettings({ ...loadSettings(), appearance });
       }
       if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) tooltip.close();
     });
 
+    /** Development: the L key writes the flight recorder to logs/. */
+    async function saveDebugLog(): Promise<void> {
+      if (!debugLog) return;
+      const gl = renderer.getContext();
+      const gpu = gl.getExtension('WEBGL_debug_renderer_info');
+      const file = await debugLog.save({
+        gpu: gpu ? gl.getParameter(gpu.UNMASKED_RENDERER_WEBGL) : null,
+        pixelRatio: renderer.getPixelRatio(),
+        settings: loadSettings(),
+        town: DEFAULT_TOWN, loadMode: TOWN_LOAD_MODE, appearance,
+        vehicle: carModel.spec.id, monitoring: perf.visible,
+        lock: { active: roadLock.active, mode: roadLock.mode },
+        car: { x: car.position.x, z: car.position.z, heading: car.heading, speed: car.speed },
+      });
+      console.info(`Debug log saved: ${file}`);
+      toast(file === 'download' ? 'Debug log downloaded' : `Debug log saved: ${file}`);
+    }
+
     // The graph is cached until the nearby tiles change, so this rebuilds the overlay once per change.
     function showRoadGraph(): void {
       const started = performance.now();
-      const graph = tiles.roadGraphNear();
+      const graph = graphNear();
       if (graph === junctionDebug.shown) return;
       const built = performance.now() - started;
+      const shownAt = performance.now();
       junctionDebug.show(graph);
+      debugLog?.event('overlay', { ms: +(performance.now() - shownAt).toFixed(2) });
       const junctions = graph.zones.reduce((sum, zone) => sum + zone.members.length, 0);
       console.debug(`Road graph: ${graph.zones.length} zones from ${junctions} junctions, ${graph.segments.length} segments, built in ${built.toFixed(1)} ms`);
     }
 
+    const lockView: LockSnapshot = {
+      active: 0, mode: 0, hold: 0, candHeading: NaN, candFlow: 0, zoneX: 0, zoneZ: 0, zoneR: 0,
+      trackAx: NaN, trackAz: NaN, trackBx: NaN, trackBz: NaN, trackT: NaN, trackDir: 0,
+      heading: 0, lateral: 0, offLen: 0, ease: 0, lastZoneR: 0,
+    };
+    let lastTick = 0, heapMB = 0, frameNumber = 0;
+
+    /** Writes one frame to the flight recorder: stage timings, the car, the lock's insides, the camera and the renderer. */
+    function recordFrame(dt: number, marks: number[]): void {
+      if (!debugLog) return;
+      const s = debugLog.sample, [t0, t1, t2, t3, t4, t5, t6] = marks;
+      s.t = t0; s.interval = lastTick ? t0 - lastTick : 0; s.dt = dt * 1000; lastTick = t0;
+      s.msTiles = t1 - t0; s.msCar = t2 - t1; s.msCamera = t3 - t2; s.msHud = t4 - t3; s.msRender = t5 - t4; s.msTotal = t6 - t0;
+      s.x = car.position.x; s.z = car.position.z; s.heading = car.heading; s.speed = car.speed;
+      roadLock.inspect(lockView);
+      s.lockActive = lockView.active; s.lockMode = lockView.mode; s.hold = lockView.hold;
+      s.candHeading = lockView.candHeading; s.candFlow = lockView.candFlow;
+      s.zoneX = lockView.zoneX; s.zoneZ = lockView.zoneZ; s.zoneR = lockView.zoneR; s.lastZoneR = lockView.lastZoneR;
+      s.trackAx = lockView.trackAx; s.trackAz = lockView.trackAz; s.trackBx = lockView.trackBx; s.trackBz = lockView.trackBz;
+      s.trackT = lockView.trackT; s.trackDir = lockView.trackDir;
+      s.lockHeading = lockView.heading; s.lateral = lockView.lateral; s.offLen = lockView.offLen; s.ease = lockView.ease;
+      s.camX = camera.position.x; s.camY = camera.position.y; s.camZ = camera.position.z;
+      s.camToCar = camera.position.distanceTo(car.position);
+      s.calls = renderer.info.render.calls; s.triangles = renderer.info.render.triangles;
+      s.geometries = renderer.info.memory.geometries; s.textures = renderer.info.memory.textures;
+      if ((frameNumber++ & 15) === 0) { // the heap size is only read now and then: reading it allocates
+        heapMB = ((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1048576;
+      }
+      s.heapMB = heapMB;
+      s.overlay = junctionDebug.visible ? 1 : 0;
+      debugLog.commit();
+    }
     function tick(dt: number): void {
+      const t0 = performance.now();
       perf.begin();
       tiles.update(car.position);
+      const t1 = performance.now();
       car.update(dt);
+      const t2 = performance.now();
       stage.moveSunTo(car.position);
       speedDisplay.update(car.speed);
       followCamera.update(dt, car.position, car.heading);
+      const t3 = performance.now();
       compass.update(car.heading);
       streetReadout.update(dt, car.position);
       locationReadout.update(dt, car.position);
@@ -259,9 +340,12 @@ async function main(): Promise<void> {
         showRoadGraph();
         junctionDebug.setCandidate(roadLock.candidate());
       }
+      const t4 = performance.now();
       renderer.render(scene, camera);
+      const t5 = performance.now();
       tooltip.update(camera); // after render, which refreshes the camera matrices
       perf.end();
+      if (debugLog) recordFrame(dt, [t0, t1, t2, t3, t4, t5, performance.now()]);
     }
 
     const clock = new THREE.Clock();

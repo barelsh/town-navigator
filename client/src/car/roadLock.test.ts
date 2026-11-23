@@ -519,3 +519,46 @@ test('applyHold keeps a car in its circle and stops it getting farther out', () 
   assert.equal(pinned.held, true);
   near(pinned.x, 9);
 });
+
+test('a road that leaves a zone and loops back does not catch the car while it drives away', () => {
+  // A lollipop: a stem ends at N = (0, 30), and a loop starts and ends there, so N is a junction. The loop's
+  // first leg runs away from N, but the road does come back to N 70 m later, which is within the 80 m the lock looks ahead.
+  const stem: Road = { highway: 'service', coords: [[0, 0], [0, 30]] };
+  const loop: Road = { highway: 'service', coords: [[0, 30], [10, 30], [10, 45], [-10, 45], [-10, 30], [0, 30]] };
+  const graph = zonedGraphOf([stem, loop]);
+  const zone = centerOf(graph, [0, 30]);
+  const speed = 25;
+  const lock = createRoadLock();
+  const start = lock.engage({ x: 10, z: -32, heading: headingXY(0, 1) }, graph)!; // on the first leg, driving north, away from N
+  assert.ok(Math.hypot(start.x - zone.x, start.z - zone.z) < zone.radius + speed * ENTER_LOOKAHEAD, 'not within the old capture distance: nothing to test');
+  const frames = ride(lock, graph, start, [{ speed, seconds: 1 }]);
+  assert.ok(frames.every(f => f.mode === 'locked'), 'a car driving away from the zone was caught by it');
+});
+
+test('the event hook reports zone captures and exits and changes nothing about the car', () => {
+  const graph = zonedGraphOf(AREA);
+  const start = { x: 19, z: -47, heading: headingXY(-7, -25) };
+  const phases: Phase[] = [{ speed: 4, seconds: 4 }, { speed: 4, steer: 1, seconds: 3 }, { speed: 4, seconds: 3 }]; // through the T, out the left exit
+  const quiet = createRoadLock();
+  const plain = ride(quiet, graph, quiet.engage(start, graph)!, phases);
+
+  const events: { kind: string; data: Record<string, number | string | null> }[] = [];
+  const heard = createRoadLock({ onEvent: (kind, data) => events.push({ kind, data }) });
+  const watched = ride(heard, graph, heard.engage(start, graph)!, phases);
+
+  assert.deepEqual(events.map(e => e.kind), ['engage', 'capture', 'exit']);
+  const [, capture, exit] = events;
+  assert.ok(Number(capture.data.carDist) <= Number(capture.data.zoneR) + Number(capture.data.lookahead));
+  assert.ok(Number(exit.data.out) > Number(exit.data.zoneR));
+  assert.ok(Math.abs(Number(exit.data.candHeading) - Math.PI * 74 / 180) < 0.1 && exit.data.candFlow === 'both');
+  plain.forEach((f, i) => { near(f.pose.x, watched[i].pose.x, 1e-12); near(f.pose.z, watched[i].pose.z, 1e-12); });
+
+  // inspect fills a reusable object with the lock's state, for the recorder.
+  const view = { active: 0, mode: 0, hold: 0, candHeading: 0, candFlow: 0, zoneX: 0, zoneZ: 0, zoneR: 0, trackAx: 0, trackAz: 0,
+    trackBx: 0, trackBz: 0, trackT: 0, trackDir: 0, heading: 0, lateral: 0, offLen: 0, ease: 0, lastZoneR: 0 };
+  heard.inspect(view);
+  assert.equal(view.active, 1);
+  assert.equal(view.mode, 0);
+  assert.ok(Number.isFinite(view.trackT));
+  assert.equal(view.lastZoneR, 0); // well clear of the zone it left by now, so the just-left guard is off
+});

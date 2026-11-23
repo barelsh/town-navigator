@@ -46,8 +46,15 @@ data/         input files and scripts
 - `C` switch camera, click a building for details
 - `P` settings, `V` building view, `M` performance panel, `F` favorites
 - `R` stick to roads: the car stays on its road and `W` / `S` only set the speed (see below)
+- `L` (development only) save the debug log, see below
 - With the performance panel on (`M`), a road graph overlay draws on the nearby roads: an orange ring per junction zone (red for dead ends), a disc per junction and a tick per exit, green if you can drive out on it and gray if it is one-way in. Close junctions, such as roundabouts and dual-carriageway crossings, share one zone.
 - `B` tile map: a north-up map of the town's tile grid showing which tiles are loaded, loading, failed or not loaded, the 3 x 3 around the car and the car's heading. Driving input pauses while it is open.
+
+### debug log
+In development (`npm run dev`) the client keeps a flight recorder: the last ~100 s of frames and the events around them. It is for chasing frame-rate drops and flicker. Press `L` right after it happens and it is written to `logs/debug-<time>.json` (git-ignored) through the dev server, or downloaded if the server doesn't answer. A toast shows the file name.
+- one row per frame (`fields` names the columns): the time between frames, milliseconds spent in tiles, car, camera, HUD and render, the car's position, heading, speed and held keys, the road lock's insides (mode, zone, track segment, snap offset, candidate exit), the camera's position and distance to the car, draw calls, triangles, geometries and the JS heap
+- events: zone captures and exits with their distances, road graph and overlay rebuilds with their time, tile changes, key presses, dialogs, settings saves, tab visibility and focus, window resizes, slow frames and page errors
+- recording allocates nothing per frame, and none of it is in the production build
 
 ### stick to roads
 - Press `R`, or tick Stick to roads under Driving in the settings (`P`). It is saved in the browser. A `ROAD` pill next to the speed shows it is on, and `A` `D` do nothing while it is.
