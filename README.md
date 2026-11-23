@@ -53,7 +53,9 @@ data/         input files and scripts
 - Press `R`, or tick Stick to roads under Driving in the settings (`P`). It is saved in the browser. A `ROAD` pill next to the speed shows it is on, and `A` `D` do nothing while it is.
 - Turning it on, and every teleport (a new starting point, Go to on a favorite), snaps the car to the nearest drivable road, facing the way it already faced. Without a road nearby it stays off.
 - The car keeps to the right-hand lane of two-way roads (1.75 m right of the center line at most) and drives on the center line of one-way roads. It eases around curves.
-- At a junction it takes the road closest to straight ahead, preferring roads it may legally drive along. At a dead end it stops, and `S` backs it out. Free steering through junctions and choosing turns come later.
+- Junctions, roundabouts and dead ends are zones (the ring drawn by the overlay with `M`). A locked car enters a zone only if its own road runs into it, about 0.3 s of speed before the zone's edge. Inside, steering is free again, as in normal driving: `A` `D` steer and collision applies, and the `ROAD` pill dims. When the car leaves the zone it locks onto the legal exit closest to its direction of travel, merging onto the lane over about a second. The overlay brightens the exit it would take. One-way-in branches never count as exits.
+- A zone with no legal exit within 100 degrees of the direction of travel holds the car at its edge. This is how dead ends work: stop, back up and steer around, and drive out the way you came. Reversing works the same way, matched by the direction of travel, so reversing into a T-junction and steering backs out onto the side road.
+- Where a town has no junction data (whole-town mode, tiles written before the junctions were added) there are no zones: the car takes the road closest to straight ahead at a junction and stops at a dead end. Choosing the turn ahead of a junction comes later.
 - Building collision is skipped while it is on, since the road decides where the car can be. Turning it off hands steering and collision back.
 
 ### tile streaming

@@ -3,7 +3,7 @@
 // Two draw calls: one mesh for rings and discs, one LineSegments for the exit ticks.
 
 import * as THREE from 'three';
-import type { RoadGraph } from '../town/roadGraph.ts';
+import type { RoadGraph, ZoneExit } from '../town/roadGraph.ts';
 import { ROAD_LINE_Y } from '../town/roads.ts';
 
 const OVERLAY_Y = ROAD_LINE_Y + 0.02;
@@ -17,6 +17,7 @@ const JUNCTION_COLOR = new THREE.Color(0xe8a33d);
 const DEAD_END_COLOR = new THREE.Color(0xd9534f);
 const EXIT_COLOR = new THREE.Color(0x4cd07d);    // you can leave on it (flow both / out)
 const ARRIVE_COLOR = new THREE.Color(0x9aa3ad);  // one-way toward the junction
+const CANDIDATE_COLOR = new THREE.Color(0xffd166); // the exit the car would lock onto if it left the zone now
 
 export interface JunctionDebug {
   readonly visible: boolean;
@@ -25,6 +26,8 @@ export interface JunctionDebug {
   show(graph: RoadGraph): void;
   /** The graph on screen, or null. */
   readonly shown: RoadGraph | null;
+  /** Brightens the tick of the exit a free car would take (null: none). Ignores exits of another graph. */
+  setCandidate(exit: ZoneExit | null): void;
 }
 
 export function createJunctionDebug(scene: THREE.Scene): JunctionDebug {
@@ -44,9 +47,29 @@ export function createJunctionDebug(scene: THREE.Scene): JunctionDebug {
     group.add(object);
   }
   let shown: RoadGraph | null = null;
+  const tickOf = new Map<ZoneExit, { first: number; color: THREE.Color }>(); // first vertex of an exit's tick
+  let lit: ZoneExit | null = null;
+
+  function paint(exit: ZoneExit, color: THREE.Color): void {
+    const tick = tickOf.get(exit);
+    const attribute = ticks.geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
+    if (!tick || !attribute) return;
+    for (let v = 0; v < 2; v++) attribute.setXYZ(tick.first + v, color.r, color.g, color.b);
+    attribute.needsUpdate = true;
+  }
+
+  function setCandidate(exit: ZoneExit | null): void {
+    const next = exit && tickOf.has(exit) ? exit : null;
+    if (next === lit) return;
+    if (lit) paint(lit, tickOf.get(lit)!.color);
+    if (next) paint(next, CANDIDATE_COLOR);
+    lit = next;
+  }
 
   function show(graph: RoadGraph): void {
     shown = graph;
+    tickOf.clear();
+    lit = null;
     const positions: number[] = [];
     const colors: number[] = [];
     const tickPositions: number[] = [];
@@ -83,6 +106,7 @@ export function createJunctionDebug(scene: THREE.Scene): JunctionDebug {
         const b = fx * dx + fz * dz, c = fx * fx + fz * fz - zone.radius * zone.radius;
         const t = -b + Math.sqrt(Math.max(0, b * b - c));
         const x0 = exit.from.x + dx * t, z0 = exit.from.z + dz * t;
+        tickOf.set(exit, { first: tickPositions.length / 3, color: exit.flow === 'in' ? ARRIVE_COLOR : EXIT_COLOR });
         tickPositions.push(x0, 0, z0, x0 + dx * TICK_LENGTH, 0, z0 + dz * TICK_LENGTH);
         const tick = exit.flow === 'in' ? ARRIVE_COLOR : EXIT_COLOR;
         tickColors.push(tick.r, tick.g, tick.b, tick.r, tick.g, tick.b);
@@ -99,6 +123,7 @@ export function createJunctionDebug(scene: THREE.Scene): JunctionDebug {
     get visible() { return group.visible; },
     setVisible(visible) { group.visible = visible; },
     show,
+    setCandidate,
     get shown() { return shown; },
   };
 }

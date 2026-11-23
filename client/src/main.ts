@@ -60,7 +60,10 @@ async function main(): Promise<void> {
     const car = createCarController(carModel, findStart(tiles.segmentsNear(target), target), (x, z, heading) =>
       Math.max(vehicleOverlap(tiles.obstaclesNear(), x, z, heading, carModel.collision), outsideDepth(tiles.index.bbox, x, z)), {
       get active() { return roadLock.active; },
+      get mode() { return roadLock.mode; },
+      get hold() { return roadLock.hold; },
       step: (pose, speed, dt) => roadLock.step(pose, speed, dt, tiles.roadGraphNear()),
+      observe: (pose, speed, dt) => roadLock.observe(pose, speed, dt, tiles.roadGraphNear()),
     });
     tiles.update(car.position);
 
@@ -251,7 +254,11 @@ async function main(): Promise<void> {
       streetReadout.update(dt, car.position);
       locationReadout.update(dt, car.position);
       tiles.updateLabels(car.heading);
-      if (junctionDebug.visible) showRoadGraph();
+      speedDisplay.setRoadLock(roadLock.active, roadLock.mode === 'free');
+      if (junctionDebug.visible) {
+        showRoadGraph();
+        junctionDebug.setCandidate(roadLock.candidate());
+      }
       renderer.render(scene, camera);
       tooltip.update(camera); // after render, which refreshes the camera matrices
       perf.end();

@@ -16,8 +16,10 @@ export const SERVICE_LOOP: Road = { highway: 'service', coords: [[-40, 88], [-29
 export const SERVICE_T: Road = { highway: 'service', coords: [[12, 22], [19, 20], [23, 16], [25, -2]] };
 export const ROUNDABOUT: Road = { highway: 'tertiary', oneway: true, coords: [[-41, 44], [-41, 46], [-42, 48], [-42, 49], [-43, 51], [-44, 52], [-46, 53], [-47, 54], [-49, 55], [-50, 55], [-52, 55], [-54, 55], [-56, 55], [-57, 54], [-59, 53], [-60, 52], [-61, 51], [-62, 49], [-63, 48], [-63, 46], [-63, 44], [-63, 43], [-63, 41], [-62, 39], [-61, 38], [-60, 37], [-59, 35], [-57, 35], [-56, 34], [-54, 33], [-52, 33], [-50, 33], [-49, 34], [-47, 35], [-46, 35], [-44, 37], [-43, 38], [-42, 39], [-42, 41], [-41, 43], [-41, 44]] };
 export const JABOTINSKY_NW: Road = { name: "ז'בוטינסקי", highway: 'tertiary', coords: [[-63, 48], [-84, 61], [-102, 76], [-201, 174]] };
+export const SERVICE_EAST: Road = { highway: 'service', coords: [[63, -45], [60, -37], [60, -31], [61, -26], [64, -18], [65, -11], [65, -4], [65, -1], [60, 61], [42, 60], [46, -1], [48, -23]] };
+export const SERVICE_CROSS: Road = { highway: 'service', coords: [[46, -1], [65, -1]] };
 
-export const AREA = [MOSHE_DAYAN, SERVICE_NORTH, JABOTINSKY_EAST, JABOTINSKY_WEST, SERVICE_LOOP, SERVICE_T, ROUNDABOUT, JABOTINSKY_NW];
+export const AREA = [MOSHE_DAYAN, SERVICE_NORTH, JABOTINSKY_EAST, JABOTINSKY_WEST, SERVICE_LOOP, SERVICE_T, ROUNDABOUT, JABOTINSKY_NW, SERVICE_EAST, SERVICE_CROSS];
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 

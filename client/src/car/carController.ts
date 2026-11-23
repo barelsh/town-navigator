@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { StartPosition } from '../town/roads.ts';
 import { DEFAULT_SPEED_LIMIT_KMH } from '../settings/settingsStore.ts';
 import type { CarModel } from './carModel.ts';
-import type { DriveGuide } from './roadLock.ts';
+import { applyHold, type DriveGuide } from './roadLock.ts';
 
 export const ACCEL = 14, BRAKE = 24, FRICTION = 6; // m/s²
 export const REVERSE_SHARE = 0.4; // reverse limit as a share of the speed limit
@@ -28,7 +28,7 @@ export function createCarController(
   start: StartPosition,
   /** How far into a building or past the town's edge the vehicle would be at this pose, in meters; 0 when clear. */
   overlap: (x: number, z: number, heading: number) => number,
-  /** While active, it places the car on the road each frame: steering and collision are skipped. */
+  /** While active and locked, it places the car on the road each frame: steering and collision are skipped. */
   guide?: DriveGuide,
 ): CarController {
   const { group } = model;
@@ -88,7 +88,7 @@ export function createCarController(
         speed = THREE.MathUtils.clamp(speed, -reverseMax, maxSpeed);
       }
 
-      if (guide?.active) {
+      if (guide?.active && guide.mode === 'locked') {
         // Stick to roads: W and S set the speed; the road decides where the car goes, so A and D do nothing
         // and a building footprint under the road can't trap the car.
         const next = guide.step({ x: group.position.x, z: group.position.z, heading }, speed, dt);
@@ -115,6 +115,20 @@ export function createCarController(
           heading = previousHeading;
           group.rotation.y = heading;
           speed *= -0.3;
+        }
+
+        if (guide?.active) {
+          // Stick to roads, free inside a junction zone: a zone with no legal exit holds the car at its edge,
+          // and a car that is out of the zone locks onto the exit.
+          if (guide.hold) {
+            const held = applyHold(guide.hold, previous, group.position);
+            if (held.held) {
+              group.position.x = held.x;
+              group.position.z = held.z;
+              speed = 0;
+            }
+          }
+          guide.observe({ x: group.position.x, z: group.position.z, heading }, speed, dt);
         }
       }
 

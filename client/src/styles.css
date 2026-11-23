@@ -16,6 +16,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
   margin-left: 4px; padding: 1px 5px; border-radius: 3px;
   background: #ffd166; color: #141820; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: 0.06em;
 }
+#road-pill.free { opacity: 0.6; } /* steering is free inside a junction zone */
 
 #compass {
   position: fixed; top: 12px; right: 12px; padding: 8px 8px 6px;

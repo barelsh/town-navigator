@@ -80,3 +80,29 @@ test('zonesAt finds a zone by its circle, grown by extra meters', () => {
   assert.ok(!graph.zonesAt(zone.x + zone.radius + 1, zone.z).includes(zone));
   assert.ok(graph.zonesAt(zone.x + zone.radius + 1, zone.z, 2).includes(zone));
 });
+
+test('every exit knows the segment where it leaves the zone', () => {
+  const graph = graphOf(AREA);
+  for (const corner of [[-54, 33], [0, 0], [12, 22]] as [number, number][]) { // roundabout, crossing, T-junction
+    const zone = zoneWith(graph.zones, corner);
+    for (const exit of zone.exits) {
+      assert.ok(exit.segment !== undefined && exit.dir !== undefined && exit.edgePoint, 'exit data is missing');
+      const { x, z } = exit.edgePoint;
+      // On the zone circle, and on its segment.
+      assert.ok(Math.abs(Math.hypot(x - zone.x, z - zone.z) - zone.radius) < 1e-6, 'not on the circle');
+      const onSegment = graph.nearestOnSegment(exit.segment, x, z);
+      assert.ok(Math.hypot(onSegment.x - x, onSegment.z - z) < 1e-6, 'not on the segment');
+      // Running along `dir` leads away from the zone's center.
+      const s = graph.segments[exit.segment];
+      assert.ok(((s.bx - s.ax) * exit.dir) * (x - zone.x) + ((s.bz - s.az) * exit.dir) * (z - zone.z) > 0, 'dir points into the zone');
+    }
+  }
+});
+
+test('nearestOnSegment gives the closest point and its distance from a, clamped to the segment', () => {
+  const graph = graphOf([{ highway: 'tertiary', coords: [[0, 0], [0, 100]] }]); // z from 0 down to -100
+  const mid = graph.nearestOnSegment(0, 5, -30);
+  assert.ok(Math.abs(mid.x) < 1e-9 && Math.abs(mid.z + 30) < 1e-9 && Math.abs(mid.t - 30) < 1e-9);
+  assert.equal(graph.nearestOnSegment(0, 3, 40).t, 0);
+  assert.equal(graph.nearestOnSegment(0, 3, -500).t, 100);
+});
