@@ -46,6 +46,7 @@ export interface DialogValues {
   vehicle: string;
   appearance: Appearance;
   monitoring: boolean;
+  roadLock: boolean;
 }
 
 export interface SettingsDialogOptions {
@@ -63,6 +64,8 @@ export interface SettingsDialog {
   readonly isOpen: boolean;
   /** Flips the Monitoring box while the dialog is open; it applies on Save like the other fields. */
   toggleMonitoring(): void;
+  /** Flips the Stick to roads box while the dialog is open; it applies on Save too. */
+  toggleRoadLock(): void;
 }
 
 export function createSettingsDialog(options: SettingsDialogOptions): SettingsDialog {
@@ -83,6 +86,7 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
   const carsDetails = $<HTMLDetailsElement>('settings-cars-details');
   const carsSummary = $('settings-cars-summary');
   const monitoring = $<HTMLInputElement>('settings-monitoring');
+  const roadLock = $<HTMLInputElement>('settings-road-lock');
   const appearanceRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="settings-appearance"]')];
   const chosenAppearance = (): Appearance => appearanceRadios.find(r => r.checked)?.value === 'plain' ? 'plain' : 'realistic';
   const carPreview = createVehiclePreview($('settings-car-preview'), $('settings-car-name'), $('settings-car-size'));
@@ -178,8 +182,9 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
 
   function open(): void {
     if (dialog.open) return;
-    const { startPoint: point, speedLimitKmh, vehicle, appearance, monitoring: shown } = options.initial();
+    const { startPoint: point, speedLimitKmh, vehicle, appearance, monitoring: shown, roadLock: locked } = options.initial();
     monitoring.checked = shown;
+    roadLock.checked = locked;
     for (const radio of appearanceRadios) radio.checked = radio.value === appearance;
     for (const radio of radios) radio.checked = radio.value === vehicle;
     carsDetails.open = false; // the list is long, so it starts folded
@@ -237,7 +242,7 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
     e.preventDefault();
     const point = read(), speedLimitKmh = parseLimit(limitInput.value);
     if (!point || speedLimitKmh === null) return;
-    const stored = options.onSave({ startPoint: point, speedLimitKmh, vehicle: chosenVehicle(), appearance: chosenAppearance(), monitoring: monitoring.checked });
+    const stored = options.onSave({ startPoint: point, speedLimitKmh, vehicle: chosenVehicle(), appearance: chosenAppearance(), monitoring: monitoring.checked, roadLock: roadLock.checked });
     if (stored) {
       dialog.close();
     } else {
@@ -256,5 +261,6 @@ export function createSettingsDialog(options: SettingsDialogOptions): SettingsDi
   return {
     get isOpen() { return dialog.open; },
     toggleMonitoring() { if (dialog.open) monitoring.checked = !monitoring.checked; },
+    toggleRoadLock() { if (dialog.open) roadLock.checked = !roadLock.checked; },
   };
 }

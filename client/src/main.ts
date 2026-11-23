@@ -4,8 +4,9 @@ import { fetchTileIndex, fetchTown } from './api/townApi.ts';
 import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
+import { createRoadLock } from './car/roadLock.ts';
 import { chaseOffset } from './car/vehicles.ts';
-import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT, TOWN_LOAD_MODE } from './config.ts';
+import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT, ROAD_LOCK_SHORTCUT, TOWN_LOAD_MODE } from './config.ts';
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createFavoritesDialog } from './hud/favoritesDialog.ts';
@@ -20,7 +21,7 @@ import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
 import { createBuildingPicker } from './town/buildingPicker.ts';
 import { currentStreet, hitsVehicle, outsideDepth, vehicleOverlap } from './town/collision.ts';
-import { favoritesOf, fromWorld, loadSettings, saveFavorites, saveSettings, speedLimitOf, appearanceOf, monitoringEnabled, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
+import { favoritesOf, fromWorld, loadSettings, saveFavorites, saveSettings, speedLimitOf, appearanceOf, monitoringEnabled, roadLockOf, toWorld, townSettings, vehicleOf } from './settings/settingsStore.ts';
 import { findStart } from './town/roads.ts';
 import { createTileManager, createWholeTown, type TownTiles } from './town/tileManager.ts';
 import { createTownKit } from './town/townChunk.ts';
@@ -55,8 +56,12 @@ async function main(): Promise<void> {
     scene.add(carModel.group);
     const target = toWorld(townSettings(settings, DEFAULT_TOWN).startPoint);
     await tiles.ensureLoaded(target); // the 3 x 3 around the start point, before the first frame
+    const roadLock = createRoadLock();
     const car = createCarController(carModel, findStart(tiles.segmentsNear(target), target), (x, z, heading) =>
-      Math.max(vehicleOverlap(tiles.obstaclesNear(), x, z, heading, carModel.collision), outsideDepth(tiles.index.bbox, x, z)));
+      Math.max(vehicleOverlap(tiles.obstaclesNear(), x, z, heading, carModel.collision), outsideDepth(tiles.index.bbox, x, z)), {
+      get active() { return roadLock.active; },
+      step: (pose, speed, dt) => roadLock.step(pose, speed, dt, tiles.roadGraphNear()),
+    });
     tiles.update(car.position);
 
     car.setSpeedLimit(speedLimitOf(settings)); // before the first frame
@@ -66,6 +71,36 @@ async function main(): Promise<void> {
     followCamera.jumpTo(car.position, car.heading);
     tiles.onChange(() => followCamera.setTallestBuilding(tiles.tallestBuilding));
     const speedDisplay = createSpeedDisplay();
+
+    // --- Stick to roads
+    const carPose = () => ({ x: car.position.x, z: car.position.z, heading: car.heading });
+    let toastTimer = 0;
+    const toast = (text: string) => { // reuses the status box for a moment
+      status.textContent = text;
+      document.body.append(status);
+      clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => status.remove(), 1500);
+    };
+    /** Turns Stick to roads on or off and returns the state it ended in: on needs a drivable road nearby. */
+    function setRoadLock(on: boolean, { announce = false, quiet = false } = {}): boolean {
+      if (on === roadLock.active) return on;
+      if (on) {
+        const snapped = roadLock.engage(carPose(), tiles.roadGraphNear());
+        if (snapped) car.setPose(snapped.x, snapped.z, snapped.heading); // a few meters at most; the camera follows
+        else if (!quiet) toast('No road nearby: Stick to roads stays off');
+      } else {
+        roadLock.disengage();
+      }
+      speedDisplay.setRoadLock(roadLock.active);
+      if (announce && roadLock.active === on) toast(`Stick to roads ${on ? 'on' : 'off'}`);
+      return roadLock.active;
+    }
+    /** After a teleport: puts the car back on the road it landed near. */
+    function reseedRoadLock(): void {
+      const snapped = roadLock.reset(carPose(), tiles.roadGraphNear());
+      if (snapped) car.setPose(snapped.x, snapped.z, snapped.heading);
+    }
+    setRoadLock(roadLockOf(settings), { quiet: true });
     const compass = createCompass();
     const locationReadout = createLocationReadout();
     const streetReadout = createStreetReadout((x, z) => currentStreet(tiles.segmentsNear(), x, z));
@@ -87,6 +122,7 @@ async function main(): Promise<void> {
           vehicle: vehicleOf(stored),
           appearance: appearanceOf(stored),
           monitoring: perf.visible, // the panel itself is the truth, also when storage is blocked
+          roadLock: roadLock.active,
         };
       },
       carPoint: () => fromWorld(car.position),
@@ -97,7 +133,7 @@ async function main(): Promise<void> {
       },
       bounds: tiles.index.bbox,
       onOpenChange: open => onDialogOpenChange(open),
-      onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring }) => {
+      onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring, roadLock: wantsRoadLock }) => {
         const latest = loadSettings();
         const previous = townSettings(latest, DEFAULT_TOWN).startPoint;
         latest.towns[DEFAULT_TOWN] = { ...latest.towns[DEFAULT_TOWN], startPoint };
@@ -106,6 +142,7 @@ async function main(): Promise<void> {
         latest.appearance = newAppearance;
         latest.monitoring = monitoring;
         setMonitoring(monitoring);
+        latest.roadLock = setRoadLock(wantsRoadLock); // stays off, and is saved off, without a road nearby
         appearance = newAppearance;
         tiles.setAppearance(newAppearance);
         car.setSpeedLimit(speedLimitKmh);
@@ -115,6 +152,7 @@ async function main(): Promise<void> {
           void tiles.ensureLoaded(world).then(() => { // load first, then place
             car.resetTo(findStart(tiles.segmentsNear(world), world));
             tiles.update(car.position);
+            reseedRoadLock();
             followCamera.jumpTo(car.position, car.heading);
           });
         }
@@ -122,7 +160,8 @@ async function main(): Promise<void> {
           carModel.setVehicle(vehicle);
           followCamera.setChaseOffset(chaseOffset(carModel.spec));
           // A bigger vehicle may not fit where the car stands: move it to the nearest road and stop there.
-          if (hitsVehicle(tiles.obstaclesNear(), car.position.x, car.position.z, car.heading, carModel.collision)) {
+          // (Locked to a road, the road decides where the car can be, so it stays.)
+          if (!roadLock.active && hitsVehicle(tiles.obstaclesNear(), car.position.x, car.position.z, car.heading, carModel.collision)) {
             car.resetTo(findStart(tiles.segmentsNear(), { x: car.position.x, z: car.position.z }));
             followCamera.jumpTo(car.position, car.heading);
           }
@@ -148,8 +187,9 @@ async function main(): Promise<void> {
         const road = findStart(tiles.segmentsNear(point), point);
         const blocked = hitsVehicle(tiles.obstaclesNear(point), point.x, point.z, road.heading, carModel.collision)
           || outsideDepth(tiles.index.bbox, point.x, point.z) > 0;
-        car.resetTo(blocked ? road : { x: point.x, z: point.z, heading: road.heading });
+        car.resetTo(blocked || roadLock.active ? road : { x: point.x, z: point.z, heading: road.heading });
         tiles.update(car.position);
+        reseedRoadLock();
         followCamera.jumpTo(car.position, car.heading);
       },
     });
@@ -170,6 +210,14 @@ async function main(): Promise<void> {
           const show = !perf.visible;
           setMonitoring(show);
           saveSettings({ ...loadSettings(), monitoring: show }); // if storage fails the panel still toggles
+        }
+      }
+      if (e.code === ROAD_LOCK_SHORTCUT && plainKey) {
+        if (settingsDialog.isOpen) {
+          settingsDialog.toggleRoadLock(); // applies on Save, like the other fields
+        } else if (!favorites.isOpen && !tileMap.isOpen) {
+          const on = setRoadLock(!roadLock.active, { announce: true });
+          saveSettings({ ...loadSettings(), roadLock: on }); // if storage fails the mode still toggles
         }
       }
       if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) {

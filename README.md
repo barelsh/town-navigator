@@ -45,8 +45,16 @@ data/         input files and scripts
 - `W` / `↑` accelerate, `S` / `↓` brake and reverse, `A` `D` / `←` `→` steer
 - `C` switch camera, click a building for details
 - `P` settings, `V` building view, `M` performance panel, `F` favorites
+- `R` stick to roads: the car stays on its road and `W` / `S` only set the speed (see below)
 - With the performance panel on (`M`), a road graph overlay draws on the nearby roads: an orange ring per junction zone (red for dead ends), a disc per junction and a tick per exit, green if you can drive out on it and gray if it is one-way in. Close junctions, such as roundabouts and dual-carriageway crossings, share one zone.
 - `B` tile map: a north-up map of the town's tile grid showing which tiles are loaded, loading, failed or not loaded, the 3 x 3 around the car and the car's heading. Driving input pauses while it is open.
+
+### stick to roads
+- Press `R`, or tick Stick to roads under Driving in the settings (`P`). It is saved in the browser. A `ROAD` pill next to the speed shows it is on, and `A` `D` do nothing while it is.
+- Turning it on, and every teleport (a new starting point, Go to on a favorite), snaps the car to the nearest drivable road, facing the way it already faced. Without a road nearby it stays off.
+- The car keeps to the right-hand lane of two-way roads (1.75 m right of the center line at most) and drives on the center line of one-way roads. It eases around curves.
+- At a junction it takes the road closest to straight ahead, preferring roads it may legally drive along. At a dead end it stops, and `S` backs it out. Free steering through junctions and choosing turns come later.
+- Building collision is skipped while it is on, since the road decides where the car can be. Turning it off hands steering and collision back.
 
 ### tile streaming
 - The client fetches `/api/towns/:id/index` and keeps the 3 x 3 tiles around the car's tile loaded, which reaches 500 m past the car, beyond the 450 m fog.

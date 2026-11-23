@@ -29,6 +29,7 @@ export interface Settings {
   vehicle?: string;
   appearance?: Appearance;
   monitoring?: boolean;
+  roadLock?: boolean;
   towns: Record<string, TownSettings | undefined>;
 }
 
@@ -67,6 +68,11 @@ export function appearanceOf(settings: Settings): Appearance {
 /** Whether the performance panel is saved as on; missing means off. */
 export function monitoringEnabled(settings: Settings): boolean {
   return settings.monitoring === true;
+}
+
+/** Whether Stick to roads is saved as on; missing means off. */
+export function roadLockOf(settings: Settings): boolean {
+  return settings.roadLock === true;
 }
 
 export function townSettings(settings: Settings, townId: string): TownSettings {

@@ -7,6 +7,7 @@ export const MONITORING_SHORTCUT = 'KeyM';
 export const APPEARANCE_SHORTCUT = 'KeyV';
 export const FAVORITES_SHORTCUT = 'KeyF';
 export const TILE_MAP_SHORTCUT = 'KeyB';
+export const ROAD_LOCK_SHORTCUT = 'KeyR';
 export const MAX_FAVORITES = 50;
 export const FAVORITE_NAME_MAX = 40;
 

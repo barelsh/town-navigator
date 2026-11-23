@@ -51,6 +51,15 @@ const SURFACE_COLORS: Record<string, number | undefined> = {
   asphalt: ASPHALT, concrete: CONCRETE, paving_stones: PAVERS, sett: PAVERS, ground: DIRT, unpaved: DIRT,
 };
 
+/**
+ * Which way traffic may run along a road drawn from a to b: 1 for a to b only (oneway=yes, 1 or true, and
+ * roundabouts), -1 for b to a only (oneway=-1), 0 for both. Keep in sync with buildJunctions in data/scripts/tile_town.js.
+ */
+export function onewayOf({ oneway, junction }: TownProperties): 0 | 1 | -1 {
+  if (oneway === '-1') return -1;
+  return oneway === 'yes' || oneway === '1' || oneway === 'true' || junction === 'roundabout' ? 1 : 0;
+}
+
 export function roadStyle({ highway, lanes, surface }: TownProperties): RoadStyle | null {
   const style = ROAD_STYLES[highway ?? ''];
   if (!style) return null;

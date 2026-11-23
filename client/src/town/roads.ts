@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { RoadFeature, TownFeature } from '@town-navigator/shared';
 import type { Point2 } from './geometry.ts';
-import { MIN_DRIVABLE_LAYER, ROAD_RANKS, roadRank, roadStyle, type RoadStyle } from './roadStyles.ts';
+import { MIN_DRIVABLE_LAYER, ROAD_RANKS, onewayOf, roadRank, roadStyle, type RoadStyle } from './roadStyles.ts';
 import { createStreetLabels, type LabelKit, type StreetLabels } from './streetLabels.ts';
 
 const ROAD_BASE_Y = 0.05;
@@ -22,6 +22,8 @@ export interface StreetSegment {
   halfWidth: number;
   name: string | undefined;
   drivable: boolean;
+  /** 1: traffic runs a to b only, -1: b to a only, 0: both ways. */
+  oneway: 0 | 1 | -1;
 }
 
 export interface StartPosition {
@@ -167,6 +169,7 @@ export function addRoads(
         halfWidth: style.width / 2,
         name: road.properties.name,
         drivable: style.layer >= MIN_DRIVABLE_LAYER,
+        oneway: onewayOf(road.properties),
       });
       if (style.line) addDashes(linePositions, ax, az, bx, bz, length, travelled);
       travelled += length;
