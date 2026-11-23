@@ -5,6 +5,7 @@ import { createCameraCollision } from './cameraCollision.ts';
 const CHASE = 0, TOP_DOWN = 1;
 const CAMERA_MODES = 2;
 const TOP_DOWN_CLEARANCE = 30; // meters above the tallest building
+const TOP_DOWN_MIN_HEIGHT = 100; // meters; the top-down view never sits lower than this
 
 export interface FollowCamera {
   update(dt: number, carPosition: THREE.Vector3, heading: number): void;
@@ -25,6 +26,7 @@ export function createFollowCamera(
   occluders: THREE.Object3D[]
 ): FollowCamera {
   let tallestBuilding = initialTallestBuilding;
+  const topDownHeight = () => Math.max(tallestBuilding + TOP_DOWN_CLEARANCE, TOP_DOWN_MIN_HEIGHT);
   const collision = createCameraCollision(occluders);
   let mode = CHASE;
   let inputEnabled = true;
@@ -50,7 +52,7 @@ export function createFollowCamera(
     jumpTo(carPosition, heading) {
       target.copy(carPosition).setY(1);
       if (mode === TOP_DOWN) {
-        camera.position.set(carPosition.x, tallestBuilding + TOP_DOWN_CLEARANCE, carPosition.z);
+        camera.position.set(carPosition.x, topDownHeight(), carPosition.z);
         camera.up.set(Math.sin(heading), 0, Math.cos(heading));
       } else {
         camera.position.set(
@@ -63,7 +65,7 @@ export function createFollowCamera(
     },
     update(dt, carPosition, heading) {
       const offset = mode === TOP_DOWN
-        ? new THREE.Vector3(0, tallestBuilding + TOP_DOWN_CLEARANCE, 0)
+        ? new THREE.Vector3(0, topDownHeight(), 0)
         : new THREE.Vector3(-Math.sin(heading) * chase.distance, chase.height, -Math.cos(heading) * chase.distance);
       // Top-down, screen up follows the car, so the map turns around it.
       const up = mode === TOP_DOWN
