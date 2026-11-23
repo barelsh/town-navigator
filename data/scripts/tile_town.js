@@ -5,6 +5,12 @@
 // Buildings (any polygon) go whole to the tile of their centroid. Roads (any
 // line) are cut where they cross a grid line, so no piece leaves its tile.
 // Tiles stay in the same meter space as the source, so each is a valid town.
+//
+// Each tile also gets a `junctions` list: drivable road nodes where 3+ branches
+// meet, and dead ends, with the direction, road and one-way flow of every
+// branch. Nodes are matched by OSM node id (`osm.nodes`) when the town has
+// them, otherwise by coordinates. The backend-only OSM data (`osm` on features,
+// tagged-node Points) is not written to tiles.
 
 const fs = require('fs');
 const path = require('path');
@@ -23,6 +29,15 @@ function townFileName(id) {
 }
 
 const round = (value) => Math.round(value * 100) / 100; // 1 cm
+const r3 = (value) => Math.round(value * 1000) / 1000;
+
+// Keep in sync with ROAD_STYLES layer >= MIN_DRIVABLE_LAYER in client/src/town/roadStyles.ts.
+const DRIVABLE_HIGHWAYS = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'trunk_link', 'primary_link',
+  'secondary_link', 'tertiary_link', 'residential', 'unclassified', 'road', 'living_street', 'service']);
+const NODE_CONTROLS = new Set(['traffic_signals', 'stop', 'give_way', 'mini_roundabout', 'turning_circle']);
+
+// A tagged OSM node, kept as a Point in the backend town file only.
+const isNodePoint = (feature) => feature.geometry?.type === 'Point' && String(feature.id).startsWith('node/');
 
 const tileOf = ([x, y], size) => ({ tx: Math.floor(x / size), ty: Math.floor(y / size) });
 const tileName = (town, { tx, ty }) => `${town}_${tx}_${ty}`;
@@ -95,6 +110,61 @@ function firstPartPositions(geometry) {
   }
 }
 
+// Junctions and dead ends of the drivable road graph over the whole town.
+// Degree counts way occurrences: +1 at a way's end, +2 in its middle.
+// useIds: false forces coordinate matching, for comparison.
+function buildJunctions(source, { useIds = true } = {}) {
+  const nodes = new Map(); // key -> { x, y, id, degree, branches }
+  const controls = new Map(); // node id -> control, from Point features 'node/<id>'
+  for (const f of source.features) {
+    if (isNodePoint(f) && NODE_CONTROLS.has(f.properties?.highway)) {
+      controls.set(Number(String(f.id).slice(5)), f.properties.highway);
+    }
+  }
+  for (const f of source.features) {
+    const p = f.properties ?? {};
+    if (f.geometry?.type !== 'LineString' || !DRIVABLE_HIGHWAYS.has(p.highway)) continue;
+    const c = f.geometry.coordinates;
+    const ids = useIds ? f.osm?.nodes : undefined;
+    const forwardOnly = p.oneway === 'yes' || p.oneway === '1' || p.oneway === 'true' || p.junction === 'roundabout';
+    const backwardOnly = p.oneway === '-1';
+    c.forEach((pos, i) => {
+      const key = ids ? ids[i] : `${pos[0]},${pos[1]}`;
+      const node = nodes.get(key) ?? { x: pos[0], y: pos[1], id: ids ? ids[i] : null, degree: 0, branches: [] };
+      node.degree += i === 0 || i === c.length - 1 ? 1 : 2;
+      for (const [j, along] of [[i + 1, true], [i - 1, false]]) {
+        if (j < 0 || j >= c.length) continue;
+        const dx = c[j][0] - pos[0];
+        const dy = c[j][1] - pos[1];
+        const len = Math.hypot(dx, dy);
+        if (len === 0) continue;
+        const flow = forwardOnly ? (along ? 'out' : 'in') : backwardOnly ? (along ? 'in' : 'out') : 'both';
+        // Undefined fields are left out of the JSON, so tiles stay small.
+        node.branches.push({ dx: r3(dx / len), dy: r3(dy / len), highway: p.highway, lanes: p.lanes, name: p.name, flow });
+      }
+      nodes.set(key, node);
+    });
+  }
+  const junctions = [];
+  for (const n of nodes.values()) {
+    if (n.degree !== 1 && n.degree < 3) continue;
+    junctions.push({
+      id: n.id,
+      x: n.x,
+      y: n.y,
+      kind: n.degree === 1 ? 'dead_end' : 'junction',
+      ...(n.id !== null && controls.has(n.id) ? { control: controls.get(n.id) } : {}),
+      branches: n.branches,
+    });
+  }
+  return junctions;
+}
+
+const countKinds = (junctions) => ({
+  junctions: junctions.filter((j) => j.kind === 'junction').length,
+  deadEnds: junctions.filter((j) => j.kind === 'dead_end').length,
+});
+
 function classify(feature) {
   const tags = feature.properties ?? {};
   if (tags.building) return 'buildings';
@@ -136,9 +206,9 @@ function assign(source, size) {
   };
   const stats = { roads: 0, pieces: 0, multiPart: 0 };
 
-  for (const feature of source.features) {
+  for (const { osm, ...feature } of source.features) { // osm: backend only
     const geometry = feature.geometry;
-    if (!geometry) continue;
+    if (!geometry || isNodePoint(feature)) continue;
     if (geometry.type === 'LineString') {
       stats.roads++;
       const pieces = splitLine(geometry.coordinates, size);
@@ -168,7 +238,15 @@ function assign(source, size) {
 function main() {
   const { town, size } = parseArgs(process.argv.slice(2));
   const { source, fileName } = readSource(town);
+  const junctions = buildJunctions(source);
+  const hasNodeIds = junctions.some((j) => j.id !== null);
   const { tiles, stats } = assign(source, size);
+  for (const junction of junctions) {
+    const key = tileOf([junction.x, junction.y], size);
+    const id = `${key.tx},${key.ty}`;
+    if (!tiles.has(id)) tiles.set(id, { ...key, features: [] });
+    (tiles.get(id).junctions ??= []).push(junction);
+  }
 
   const outDir = path.join(TILES_DIR, town);
   fs.rmSync(outDir, { recursive: true, force: true });
@@ -190,11 +268,19 @@ function main() {
         bounds: [tile.tx * size, tile.ty * size, (tile.tx + 1) * size, (tile.ty + 1) * size],
       },
       features: tile.features,
+      junctions: tile.junctions ?? [],
     })}\n`;
     fs.writeFileSync(path.join(outDir, `${name}.geojson`), body);
     const count = { buildings: 0, roads: 0, other: 0 };
     for (const feature of tile.features) count[classify(feature)]++;
-    index.push({ tx: tile.tx, ty: tile.ty, file: `${name}.geojson`, ...count, bytes: Buffer.byteLength(body) });
+    index.push({
+      tx: tile.tx,
+      ty: tile.ty,
+      file: `${name}.geojson`,
+      ...count,
+      junctions: tile.junctions?.length ?? 0,
+      bytes: Buffer.byteLength(body),
+    });
   }
 
   const grid = {
@@ -225,6 +311,12 @@ function main() {
   console.log(`Tiles written: ${index.length} (of ${cells} grid cells; empty cells skipped)`);
   console.log(`Buildings: ${total('buildings')} in ${index.length} tiles, max ${max('buildings').buildings} per tile (${label(max('buildings'))})`);
   console.log(`Road pieces: ${stats.pieces} from ${stats.roads} roads, max ${max('roads').roads} per tile (${label(max('roads'))})`);
+  const kinds = countKinds(junctions);
+  console.log(`Junctions: ${kinds.junctions} (dead ends: ${kinds.deadEnds}) by ${hasNodeIds ? 'node id' : 'coordinates'}`);
+  if (hasNodeIds) {
+    const byCoords = countKinds(buildJunctions(source, { useIds: false }));
+    console.log(`  coordinate matching would find ${byCoords.junctions} (dead ends: ${byCoords.deadEnds})`);
+  }
   console.log(`Largest tile: ${Math.round(max('bytes').bytes / 1024)} KB (${label(max('bytes'))})`);
   if (stats.multiPart) console.log(`Warning: ${stats.multiPart} multi-part features were placed by their first part.`);
   console.log(`Wrote ${path.relative(process.cwd(), outDir)}/ (${index.length} tiles + ${town}_index.json)`);

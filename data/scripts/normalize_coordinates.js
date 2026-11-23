@@ -1,22 +1,83 @@
 // Converts raw.geojson (WGS84 lon/lat) into town_meters.geojson: the same
 // features with [x east, y north] positions in meters around the town center.
 //
+// The input is either an overpass-turbo GeoJSON export, or raw Overpass OSM
+// JSON (an `elements` array, e.g. raw_<town>.osm.json). OSM JSON is converted
+// with osmtogeojson and keeps what GeoJSON drops, for the backend only: road
+// node ids (`osm.nodes`), tagged nodes as Point features and turn restrictions
+// (`osm.restrictions` on the collection).
+//
 // Uses an equirectangular projection, which is accurate to under a meter at
 // town scale. The output keeps the GeoJSON structure, but RFC 7946 requires
 // lon/lat positions, so map tools will misplace it.
 
 const fs = require('fs');
 const path = require('path');
+const osmtogeojson = require('osmtogeojson');
 
 const DATA_DIR = path.join(__dirname, '..');
 const DEFAULT_INPUT = 'raw.geojson';
 
-// raw.geojson -> town_meters.geojson, other.geojson -> town_meters_other.geojson
-function outputPathFor(inputPath) {
-  const inputName = path.basename(inputPath, path.extname(inputPath));
+// Same rule as VALID_TOWN_ID in server/src/services/townStore.ts and tile_town.js.
+const VALID_TOWN_ID = /^[A-Za-z0-9_-]+$/;
+
+// raw.geojson -> town_meters.geojson, other.geojson -> town_meters_other.geojson,
+// other.osm.json -> town_meters_other.geojson. An explicit town id names the output instead.
+function outputPathFor(inputPath, townId) {
+  const inputName = path.basename(inputPath, path.extname(inputPath)).replace(/\.osm$/, '');
   const defaultName = path.basename(DEFAULT_INPUT, path.extname(DEFAULT_INPUT));
-  const suffix = inputName === defaultName ? '' : `_${inputName}`;
+  const name = townId ?? inputName;
+  const suffix = name === defaultName ? '' : `_${name}`;
   return path.join(DATA_DIR, `town_meters${suffix}.geojson`);
+}
+
+// Raw Overpass OSM JSON -> a lon/lat FeatureCollection shaped like an
+// overpass-turbo export, plus node ids, tagged-node Points and restrictions.
+function fromOverpass(raw) {
+  const ways = new Map(raw.elements.filter((e) => e.type === 'way').map((w) => [w.id, w]));
+  const tags = new Map(raw.elements.map((e) => [`${e.type}/${e.id}`, e.tags ?? {}]));
+  const geo = osmtogeojson(raw);
+  const stats = { roadsWithNodes: 0, taggedNodes: 0, restrictions: 0 };
+
+  const features = [];
+  for (const feature of geo.features) {
+    const id = String(feature.id);
+    // Restriction relations go to collection.osm instead of becoming features.
+    if (id.startsWith('relation/') && tags.get(id)?.type === 'restriction') continue;
+    feature.properties = { '@id': id, ...tags.get(id) };
+    const way = id.startsWith('way/') && ways.get(Number(id.slice(4)));
+    if (way && feature.geometry?.type === 'LineString') {
+      const positions = feature.geometry.coordinates.length;
+      if (way.nodes.length !== positions) {
+        throw new Error(`${id}: ${way.nodes.length} nodes, ${positions} positions`);
+      }
+      feature.osm = { nodes: way.nodes };
+      if (feature.properties.highway) stats.roadsWithNodes++;
+    }
+    if (id.startsWith('node/')) stats.taggedNodes++;
+    features.push(feature);
+  }
+
+  const restrictions = raw.elements
+    .filter((e) => e.type === 'relation' && e.tags?.type === 'restriction')
+    .map(({ id, tags: relationTags, members }) => ({
+      id,
+      tags: relationTags,
+      members: members.map(({ type, ref, role }) => ({ type, ref, role })),
+    }));
+  stats.restrictions = restrictions.length;
+
+  return {
+    collection: {
+      type: 'FeatureCollection',
+      generator: raw.generator,
+      copyright: raw.osm3s?.copyright,
+      timestamp: raw.osm3s?.timestamp_osm_base,
+      features,
+      osm: { restrictions },
+    },
+    stats,
+  };
 }
 
 const EARTH_RADIUS_M = 6378137;
@@ -107,16 +168,27 @@ function normalize(raw) {
 
 function main() {
   // Optional argument: raw file name, relative to the data dir.
+  // Optional second argument: the town id of the output, e.g. rosh_haayin.
   const input = path.resolve(DATA_DIR, process.argv[2] ?? DEFAULT_INPUT);
-  const raw = JSON.parse(fs.readFileSync(input, 'utf8'));
+  const townId = process.argv[3];
+  if (townId !== undefined && !VALID_TOWN_ID.test(townId)) {
+    throw new Error(`Invalid town id "${townId}". Use letters, digits, _ and -.`);
+  }
+  let raw = JSON.parse(fs.readFileSync(input, 'utf8'));
+  let osmStats = null;
+  if (Array.isArray(raw.elements)) ({ collection: raw, stats: osmStats } = fromOverpass(raw));
   const { collection, pointCount } = normalize(raw);
-  const output = outputPathFor(input);
+  const output = outputPathFor(input, townId);
   fs.writeFileSync(output, `${JSON.stringify(collection)}\n`);
 
   const [minX, minY, maxX, maxY] = collection.bbox;
   console.log(`Features: ${collection.features.length}, points: ${pointCount}`);
   console.log(`Origin: lon ${collection.origin.lon}, lat ${collection.origin.lat}`);
   console.log(`Extent (m): x ${minX} to ${maxX}, y ${minY} to ${maxY}`);
+  if (osmStats) {
+    const n = (value) => value.toLocaleString('en-US');
+    console.log(`Roads with node ids: ${n(osmStats.roadsWithNodes)} · tagged nodes: ${n(osmStats.taggedNodes)} · restrictions: ${n(osmStats.restrictions)}`);
+  }
   console.log(`Wrote ${path.relative(process.cwd(), output)}`);
 }
 
