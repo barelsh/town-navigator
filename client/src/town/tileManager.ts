@@ -4,6 +4,7 @@ import { fetchTile, HttpError } from '../api/townApi.ts';
 import { LOAD_RADIUS, MAX_IN_FLIGHT, UNLOAD_RADIUS } from '../config.ts';
 import type { Appearance } from './buildings.ts';
 import type { Obstacle } from './collision.ts';
+import { createRoadGraph, type RoadGraph, type WorldJunction } from './roadGraph.ts';
 import type { StreetSegment } from './roads.ts';
 import { buildChunk, type TownChunk, type TownKit } from './townChunk.ts';
 
@@ -24,6 +25,8 @@ export interface TownTiles {
   /** The 3 x 3 around the car's tile (cached), or around a point. */
   obstaclesNear(point?: XZ): Obstacle[];
   segmentsNear(point?: XZ): StreetSegment[];
+  /** Road graph over the 3 x 3 around the car's tile. Built on first use, cached until the tiles change. */
+  roadGraphNear(): RoadGraph;
   setAppearance(appearance: Appearance): void;
   updateLabels(heading: number): void;
   /** Status of every tile that isn't idle, for the tile map. Keys are `${tx},${ty}`. */
@@ -51,6 +54,7 @@ export function createWholeTown(scene: THREE.Scene, kit: TownKit, town: Town, ap
     tiles: [],
   };
   const listeners: (() => void)[] = [];
+  let graph: RoadGraph | null = null;
   return {
     index,
     pickTargets: chunk.pickTargets,
@@ -60,6 +64,7 @@ export function createWholeTown(scene: THREE.Scene, kit: TownKit, town: Town, ap
     ensureLoaded: () => Promise.resolve(),
     obstaclesNear: () => chunk.obstacles,
     segmentsNear: () => chunk.segments,
+    roadGraphNear: () => (graph ??= createRoadGraph(chunk.segments, [])), // no junctions: no zones
     setAppearance: a => chunk.setAppearance(a),
     updateLabels: h => chunk.updateLabels(h),
     statuses: () => new Map([['0,0', 'loaded']]),
@@ -70,6 +75,8 @@ export function createWholeTown(scene: THREE.Scene, kit: TownKit, town: Town, ap
 
 // ---------------------------------------------------------------------------------------------
 // Tile streaming.
+
+interface Nearby { obstacles: Obstacle[]; segments: StreetSegment[]; junctions: WorldJunction[] }
 
 interface Entry extends TileKey {
   key: string;
@@ -101,14 +108,15 @@ export function createTileManager(
   let pinned = new Set<string>();           // tiles an ensureLoaded asked for, kept until the car moves on
   let car: TileKey | null = null;
   let carPosition: XZ = { x: 0, z: 0 };
-  let nearby: { obstacles: Obstacle[]; segments: StreetSegment[] } | null = null;
+  let nearby: Nearby | null = null;
+  let graph: RoadGraph | null = null;
   const listeners: (() => void)[] = [];
 
   const pickTargets = new Map<THREE.Object3D, BuildingFeature>();
   const occluders: THREE.Mesh[] = [];
   const manager: TownTiles = {
     index, pickTargets, occluders, tallestBuilding: 0,
-    update, ensureLoaded, obstaclesNear, segmentsNear, onChange,
+    update, ensureLoaded, obstaclesNear, segmentsNear, roadGraphNear, onChange,
     setAppearance(next) {
       appearance = next;
       for (const entry of entries.values()) entry.chunk?.setAppearance(next);
@@ -127,7 +135,7 @@ export function createTileManager(
   const tileAt = ({ x, z }: XZ): TileKey => ({ tx: Math.floor(x / size), ty: Math.floor(-z / size) });
   const distanceToCar = (t: TileKey) =>
     Math.hypot((t.tx + 0.5) * size - carPosition.x, (t.ty + 0.5) * size + carPosition.z);
-  const changed = () => { nearby = null; for (const listener of listeners) listener(); };
+  const changed = () => { nearby = null; graph = null; for (const listener of listeners) listener(); };
 
   function onChange(listener: () => void): void {
     listeners.push(listener);
@@ -188,7 +196,7 @@ export function createTileManager(
     const at = ready.indexOf(entry);
     if (at >= 0) ready.splice(at, 1);
     if (entries.get(entry.key) !== entry || !entry.tile) return;
-    const chunk = buildChunk(kit, entry.tile.features, appearance);
+    const chunk = buildChunk(kit, entry.tile.features, appearance, entry.tile.junctions);
     entry.tile = undefined;
     entry.chunk = chunk;
     entry.status = 'loaded';
@@ -240,6 +248,7 @@ export function createTileManager(
     if (!car || car.tx !== tile.tx || car.ty !== tile.ty) {
       car = tile;
       nearby = null;
+      graph = null;
       retarget(true);
     }
     // One chunk per frame, the closest first, so a big tile doesn't stall the frame.
@@ -280,15 +289,27 @@ export function createTileManager(
     return found;
   }
 
-  function join(center: TileKey): { obstacles: Obstacle[]; segments: StreetSegment[] } {
+  function join(center: TileKey): Nearby {
     const chunks = around(center).map(e => e.chunk!);
-    return { obstacles: chunks.flatMap(c => c.obstacles), segments: chunks.flatMap(c => c.segments) };
+    return {
+      obstacles: chunks.flatMap(c => c.obstacles),
+      segments: chunks.flatMap(c => c.segments),
+      junctions: chunks.flatMap(c => c.junctions),
+    };
   }
 
-  function nearbyOf(point?: XZ): { obstacles: Obstacle[]; segments: StreetSegment[] } {
+  function nearbyOf(point?: XZ): Nearby {
     if (point) return join(tileAt(point));
-    if (!car) return { obstacles: [], segments: [] };
+    if (!car) return { obstacles: [], segments: [], junctions: [] };
     return (nearby ??= join(car));
+  }
+
+  function roadGraphNear(): RoadGraph {
+    if (!graph) {
+      const { segments, junctions } = nearbyOf();
+      graph = createRoadGraph(segments, junctions);
+    }
+    return graph;
   }
 
   function obstaclesNear(point?: XZ): Obstacle[] {

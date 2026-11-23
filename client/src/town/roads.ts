@@ -11,6 +11,9 @@ const DASH_LENGTH = 2.2;
 const DASH_SPACING = 5;
 const JOINT_SEGMENTS = 12;
 
+/** Height of the center lines, above every road surface. */
+export const ROAD_LINE_Y = ROAD_BASE_Y + ROAD_RANKS * ROAD_RANK_GAP;
+
 export interface StreetSegment {
   ax: number;
   az: number;
@@ -182,7 +185,7 @@ export function addRoads(
     meshes.push(surface);
   }
 
-  const lineY = ROAD_BASE_Y + ROAD_RANKS * ROAD_RANK_GAP;
+  const lineY = ROAD_LINE_Y;
   if (linePositions.length) {
     const centerLines = flatMesh(linePositions, kit.roads.line);
     centerLines.position.y = lineY;

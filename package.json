@@ -18,7 +18,8 @@
     "start": "npm start -w server",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "normalize": "node data/scripts/normalize_coordinates.js",
-    "tile": "node data/scripts/tile_town.js"
+    "tile": "node data/scripts/tile_town.js",
+    "test": "node --test client/src"
   },
   "devDependencies": {
     "concurrently": "^10.0.7",

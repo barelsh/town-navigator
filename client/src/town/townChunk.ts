@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import type { BuildingFeature, TownFeature } from '@town-navigator/shared';
+import type { BuildingFeature, Junction, TownFeature } from '@town-navigator/shared';
 import { createApartmentFacadeKit, type ApartmentFacadeKit } from './apartmentFacade.ts';
 import { createBuildingMaterialKit, type BuildingMaterialKit } from './buildingMaterials.ts';
 import { addBuildings, type Appearance } from './buildings.ts';
 import type { Obstacle } from './collision.ts';
+import { toWorldJunctions, type WorldJunction } from './roadGraph.ts';
 import { addRoads, createRoadKit, type RoadKit, type StreetSegment } from './roads.ts';
 import { createSchoolFacadeKit, type SchoolFacadeKit } from './schoolFacade.ts';
 import { createLabelKit, type LabelKit } from './streetLabels.ts';
@@ -23,6 +24,7 @@ export interface TownChunk {
   group: THREE.Group;
   obstacles: Obstacle[];
   segments: StreetSegment[];
+  junctions: WorldJunction[]; // from the tile's junctions list; none in whole-town mode
   pickTargets: Map<THREE.Object3D, BuildingFeature>;
   occluders: THREE.Mesh[]; // building meshes, for camera collision
   tallestBuilding: number;
@@ -43,7 +45,9 @@ export function createTownKit(renderer: THREE.WebGLRenderer): TownKit {
   };
 }
 
-export function buildChunk(kit: TownKit, features: TownFeature[], appearance: Appearance): TownChunk {
+export function buildChunk(
+  kit: TownKit, features: TownFeature[], appearance: Appearance, junctions: Junction[] = [],
+): TownChunk {
   const group = new THREE.Group();
   const buildings = addBuildings(group, features, kit, appearance);
   const roads = addRoads(group, features, kit);
@@ -52,6 +56,7 @@ export function buildChunk(kit: TownKit, features: TownFeature[], appearance: Ap
     group,
     obstacles: buildings.obstacles,
     segments: roads.segments,
+    junctions: toWorldJunctions(junctions),
     pickTargets: buildings.pickTargets,
     occluders: [...buildings.pickTargets.keys()].filter(object => object instanceof THREE.Mesh),
     tallestBuilding: buildings.tallestBuilding,

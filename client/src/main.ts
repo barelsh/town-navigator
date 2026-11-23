@@ -9,6 +9,7 @@ import { APPEARANCE_SHORTCUT, DEFAULT_TOWN, MONITORING_SHORTCUT, TOWN_LOAD_MODE 
 import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createFavoritesDialog } from './hud/favoritesDialog.ts';
+import { createJunctionDebug } from './hud/junctionDebug.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
 import { createPerfMonitor } from './hud/perfMonitor.ts';
 import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
@@ -35,7 +36,12 @@ async function main(): Promise<void> {
 
     const settings = loadSettings();
     const perf = createPerfMonitor(renderer);
-    perf.setVisible(monitoringEnabled(settings));
+    const junctionDebug = createJunctionDebug(scene); // the road graph overlay shows with the panel
+    const setMonitoring = (visible: boolean) => {
+      perf.setVisible(visible);
+      junctionDebug.setVisible(visible);
+    };
+    setMonitoring(monitoringEnabled(settings));
     let appearance = appearanceOf(settings);
     const kit = createTownKit(renderer);
     const streaming = TOWN_LOAD_MODE === 'tiles';
@@ -99,7 +105,7 @@ async function main(): Promise<void> {
         latest.vehicle = vehicle;
         latest.appearance = newAppearance;
         latest.monitoring = monitoring;
-        perf.setVisible(monitoring);
+        setMonitoring(monitoring);
         appearance = newAppearance;
         tiles.setAppearance(newAppearance);
         car.setSpeedLimit(speedLimitKmh);
@@ -162,7 +168,7 @@ async function main(): Promise<void> {
           settingsDialog.toggleMonitoring(); // applies on Save, like the other fields
         } else {
           const show = !perf.visible;
-          perf.setVisible(show);
+          setMonitoring(show);
           saveSettings({ ...loadSettings(), monitoring: show }); // if storage fails the panel still toggles
         }
       }
@@ -175,6 +181,17 @@ async function main(): Promise<void> {
       if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) tooltip.close();
     });
 
+    // The graph is cached until the nearby tiles change, so this rebuilds the overlay once per change.
+    function showRoadGraph(): void {
+      const started = performance.now();
+      const graph = tiles.roadGraphNear();
+      if (graph === junctionDebug.shown) return;
+      const built = performance.now() - started;
+      junctionDebug.show(graph);
+      const junctions = graph.zones.reduce((sum, zone) => sum + zone.members.length, 0);
+      console.debug(`Road graph: ${graph.zones.length} zones from ${junctions} junctions, ${graph.segments.length} segments, built in ${built.toFixed(1)} ms`);
+    }
+
     function tick(dt: number): void {
       perf.begin();
       tiles.update(car.position);
@@ -186,6 +203,7 @@ async function main(): Promise<void> {
       streetReadout.update(dt, car.position);
       locationReadout.update(dt, car.position);
       tiles.updateLabels(car.heading);
+      if (junctionDebug.visible) showRoadGraph();
       renderer.render(scene, camera);
       tooltip.update(camera); // after render, which refreshes the camera matrices
       perf.end();

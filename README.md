@@ -39,11 +39,13 @@ data/         input files and scripts
 - `npm run dev` - run server and client with auto-reload, open http://localhost:5173
 - `npm run build` then `npm start` - run the built app, open http://localhost:3000
 - `npm run typecheck` - check types in all packages
+- `npm test` - run the unit tests (`client/src/**/*.test.ts`, e.g. the road graph) with Node's built-in test runner
 
 ### controls
 - `W` / `↑` accelerate, `S` / `↓` brake and reverse, `A` `D` / `←` `→` steer
 - `C` switch camera, click a building for details
 - `P` settings, `V` building view, `M` performance panel, `F` favorites
+- With the performance panel on (`M`), a road graph overlay draws on the nearby roads: an orange ring per junction zone (red for dead ends), a disc per junction and a tick per exit, green if you can drive out on it and gray if it is one-way in. Close junctions, such as roundabouts and dual-carriageway crossings, share one zone.
 - `B` tile map: a north-up map of the town's tile grid showing which tiles are loaded, loading, failed or not loaded, the 3 x 3 around the car and the car's heading. Driving input pauses while it is open.
 
 ### tile streaming
