@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AREA, JABOTINSKY_EAST, JABOTINSKY_NW, JABOTINSKY_WEST, SERVICE_NORTH, SERVICE_T, graphOf as zonedGraphOf, junctionsOf, segmentsOf, type Road } from '../town/roadFixtures.ts';
+import { AREA, JABOTINSKY_EAST, MOSHE_DAYAN, ROUNDABOUT, JABOTINSKY_NW, JABOTINSKY_WEST, SERVICE_NORTH, SERVICE_T, graphOf as zonedGraphOf, junctionsOf, segmentsOf, type Road } from '../town/roadFixtures.ts';
 import { createRoadGraph, toWorldJunctions, type RoadGraph } from '../town/roadGraph.ts';
 import { onewayOf } from '../town/roadStyles.ts';
-import { applyHold, createRoadLock, ENTER_LOOKAHEAD, EXIT_MARGIN, LANE_OFFSET, type Pose, type RoadLock } from './roadLock.ts';
+import { averageRadius, pursue, routeSpeed, ROUTE_SPEED_MAX, ROUTE_SPEED_MIN, tightestRadius } from './turnRoute.ts';
+import { applyHold, brakingDistance, CAP_BRAKE, createRoadLock, ENTER_LOOKAHEAD, EXIT_MARGIN, LANE_OFFSET, pickTarget, TURN_AROUND_CAP, type Pose, type RoadLock, type Side } from './roadLock.ts';
 
 // Roads are [x east, y north] meters; poses are world x east, z south (z = -y).
 const NORTH = Math.PI; // facing north: forward is (sin h, cos h) = (0, -1) in x, z
@@ -546,8 +547,8 @@ test('the event hook reports zone captures and exits and changes nothing about t
   const heard = createRoadLock({ onEvent: (kind, data) => events.push({ kind, data }) });
   const watched = ride(heard, graph, heard.engage(start, graph)!, phases);
 
-  assert.deepEqual(events.map(e => e.kind), ['engage', 'capture', 'exit']);
-  const [, capture, exit] = events;
+  assert.deepEqual(events.map(e => e.kind), ['engage', 'capture', 'target', 'exit']);
+  const [, capture, , exit] = events;
   assert.ok(Number(capture.data.carDist) <= Number(capture.data.zoneR) + Number(capture.data.lookahead));
   assert.ok(Number(exit.data.out) > Number(exit.data.zoneR));
   assert.ok(Math.abs(Number(exit.data.candHeading) - Math.PI * 74 / 180) < 0.1 && exit.data.candFlow === 'both');
@@ -561,4 +562,471 @@ test('the event hook reports zone captures and exits and changes nothing about t
   assert.equal(view.mode, 0);
   assert.ok(Number.isFinite(view.trackT));
   assert.equal(view.lastZoneR, 0); // well clear of the zone it left by now, so the just-left guard is off
+});
+
+// ---------------------------------------------------------------------------------------------
+// TN-37: choosing the next turn before the junction.
+
+interface TurnFrame { t: number; pose: Pose; speed: number; mode: 'locked' | 'free'; cap: number | undefined; arrow: boolean; intent: Side | null; auto: number | null; exitDeg: number | null }
+
+/**
+ * Drives the lock the way carController does with Stick to roads on: a cruise speed (the player's W), the speed cap
+ * brakes at 6 m/s² and W can't push past it, and a free car steers by hand (`manual`, +1 is A) or lets auto-steer do it.
+ * `on` runs before each frame, for key presses and taps.
+ */
+function rideTurn(lock: RoadLock, graph: RoadGraph, start: Pose, cruise: number, seconds: number,
+  { on, manual }: { on?: (t: number, lock: RoadLock) => void; manual?: (t: number) => number } = {}): TurnFrame[] {
+  const frames: TurnFrame[] = [];
+  let pose: Pose = { ...start };
+  let speed = cruise;
+  for (let i = 0; i * DT < seconds - 1e-9; i++) {
+    const t = i * DT;
+    on?.(t, lock);
+    let auto: number | null = null;
+    const before = speed;
+    speed = Math.min(cruise, speed + 14 * DT);
+    const cap = lock.speedCap;
+    if (cap !== undefined && speed > cap) speed = Math.max(cap, Math.min(speed, before - CAP_BRAKE * DT));
+    if (lock.mode === 'locked') {
+      const next = lock.step(pose, speed, DT, graph);
+      pose = { x: next.x, z: next.z, heading: next.heading };
+      speed = next.speed;
+    } else {
+      let steer = manual?.(t) ?? 0;
+      lock.steerHeld(steer !== 0);
+      if (steer === 0) { auto = lock.autoSteer(pose, speed); steer = auto ?? 0; }
+      const before = { x: pose.x, z: pose.z };
+      pose = { ...pose, heading: pose.heading + steer * DT * 2.2 * Math.max(-1, Math.min(1, speed / 8)) };
+      pose.x += Math.sin(pose.heading) * speed * DT;
+      pose.z += Math.cos(pose.heading) * speed * DT;
+      if (lock.hold) {
+        const held = applyHold(lock.hold, before, pose);
+        if (held.held) { pose.x = held.x; pose.z = held.z; speed = 0; }
+      }
+      lock.observe(pose, speed, DT, graph);
+    }
+    const arrow = lock.arrow();
+    frames.push({ t, pose: { ...pose }, speed, mode: lock.mode, cap: lock.speedCap, arrow: arrow !== null, intent: lock.intent, auto,
+      exitDeg: arrow ? Math.round((arrow.heading * 180) / Math.PI) : null });
+  }
+  return frames;
+}
+
+const deg = (degrees: number) => (degrees * Math.PI) / 180;
+const SOUTH_ON_SERVICE: Pose = { x: 19, z: -47, heading: headingXY(-7, -25) }; // on the service road, heading south toward the T and the crossing
+/** The exit's heading in degrees, rounded: how the tests name an exit. */
+const named = (target: ReturnType<typeof pickTarget>) => (target ? Math.round((target.exit.heading * 180) / Math.PI) : null);
+
+test('left, right and none pick the expected exit at the crossing, and never a one-way-in exit', () => {
+  const graph = zonedGraphOf(AREA);
+  const zone = centerOf(graph, [0, 0]);
+  const approach = headingXY(-9, -15); // down the service road from the north: exits at 56 deg (east) and -131 deg (south-west)
+  assert.equal(named(pickTarget(zone, approach, 'left')), 56);
+  assert.equal(named(pickTarget(zone, approach, 'right')), -131);
+  // No straight exit, so with no turn asked for the smallest turn wins: 87 deg left against 100 deg right.
+  assert.equal(named(pickTarget(zone, approach, null)), 56);
+  for (const intent of ['left', 'right', null] as const) {
+    for (const heading of [0, 1, 2, 3, -1, -2]) assert.notEqual(pickTarget(zone, heading, intent)?.exit.flow, 'in');
+  }
+  assert.equal(pickTarget(centerOf(graph, [25, -2]), 0, null), null); // a dead end has no target unless a turn is asked for
+});
+
+test('a T taken from its stem with no intent turns to the smallest-angle exit', () => {
+  const graph = zonedGraphOf(AREA);
+  const zone = centerOf(graph, [12, 22]);
+  const fromTheSideRoad = headingXY(-7, 2); // heading west into the T from the service road to the east
+  const target = pickTarget(zone, fromTheSideRoad, null)!;
+  assert.equal(named(target), -23); // 83 deg left, against 101 deg right
+  assert.equal(target.byIntent, false);
+  // Straight on is taken when there is one.
+  assert.equal(named(pickTarget(zone, headingXY(-3, -10), null)), -23);
+});
+
+test('the queued turn survives plain joins, goes to the next zone and clears when it is used', () => {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  const frames = rideTurn(lock, graph, start, 8, 8, { on: (t, l) => { if (t === 0) l.press('left'); } });
+  assert.equal(frames[0].intent, 'left');
+  const entered = firstFree(frames as never);
+  assert.ok(entered > 0 && frames[entered].intent === 'left', 'the intent is still queued when the T catches the car');
+  const left = frames.findIndex((f, i) => i > entered && f.mode === 'locked');
+  assert.ok(left > 0, 'the car left the T');
+  assert.equal(frames[left].intent, null, 'used up by the T');
+});
+
+test('pressing the opposite key cancels the intent, the same key keeps it', () => {
+  const lock = createRoadLock();
+  const graph = zonedGraphOf(AREA);
+  lock.engage(SOUTH_ON_SERVICE, graph);
+  lock.press('left');
+  assert.equal(lock.intent, 'left');
+  lock.press('left');
+  assert.equal(lock.intent, 'left');
+  lock.press('right');
+  assert.equal(lock.intent, null);
+  lock.press('right');
+  assert.equal(lock.intent, 'right');
+  lock.disengage();
+  assert.equal(lock.intent, null);
+});
+
+test('an intent with no exit on that side stays queued for the next zone', () => {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  // The T has no exit on the right, so the car goes straight on; the turn waits for the crossing.
+  const frames = rideTurn(lock, graph, start, 8, 6, { on: (t, l) => { if (t === 0) l.press('right'); } });
+  const first = firstFree(frames as never);
+  const out = frames.findIndex((f, i) => i > first && f.mode === 'locked');
+  assert.ok(first > 0 && out > first);
+  assert.equal(frames[out].intent, 'right');
+  assert.ok(distanceToRoads(frames[out + 10].pose, [SERVICE_NORTH]) < 2.5 && frames[out + 10].pose.z > -22, 'went straight on, south along the service road');
+  assert.equal(pickTarget(centerOf(graph, [12, 22]), headingXY(-3, -4), 'right')?.byIntent, false);
+});
+
+test('auto-steer leaves the zone on the target exit at the turn speed', () => {
+  const graph = zonedGraphOf(AREA);
+  for (const [side, road] of [['left', SERVICE_T]] as const) {
+    const lock = createRoadLock();
+    const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+    const frames = rideTurn(lock, graph, start, 14, 8, { on: (t, l) => { if (t === 0) l.press(side); } });
+    const first = firstFree(frames as never);
+    const out = frames.findIndex((f, i) => i > first && f.mode === 'locked');
+    assert.ok(first > 0 && out > first, 'entered and left the zone');
+    const turnSpeed = frames[first].cap!; // the speed of the route through the T
+    assert.ok(turnSpeed >= ROUTE_SPEED_MIN && turnSpeed <= ROUTE_SPEED_MAX, `${turnSpeed * 3.6} km/h`);
+    assert.ok(frames[first].speed <= turnSpeed + 0.25, `entered at ${frames[first].speed * 3.6} km/h`);
+    assert.ok(frames[out].speed <= turnSpeed + 0.05, `left at ${frames[out].speed * 3.6} km/h`);
+    // Out of the zone it is on the side road, in the right-hand lane.
+    const later = frames[Math.min(frames.length - 1, out + 10)].pose;
+    assert.ok(distanceToRoads(later, [road]) < 2.5, `${distanceToRoads(later, [road])} m from the side road`);
+    assert.ok(Math.abs(rightOfRoad(later, road) - 1) < 0.35, `lane ${rightOfRoad(later, road)}`);
+  }
+});
+
+test('the steer sign: a route curving left asks for +1 (A), curving right for -1 (D)', () => {
+  // A car at the origin facing south (heading 0, forward is +z); east is to its left.
+  const car = { x: 0, z: 0, heading: 0 };
+  const left = pursue([{ x: 0, z: 0 }, { x: 0, z: 4 }, { x: 8, z: 8 }], car, 0, 5, 2.5);
+  const right = pursue([{ x: 0, z: 0 }, { x: 0, z: 4 }, { x: -8, z: 8 }], car, 0, 5, 2.5);
+  assert.ok(left.steer > 0 && right.steer < 0, `${left.steer} ${right.steer}`);
+  assert.ok(Math.abs(left.steer) <= 1 && Math.abs(right.steer) <= 1);
+  // Dead ahead is no steer at all.
+  assert.ok(Math.abs(pursue([{ x: 0, z: 0 }, { x: 0, z: 20 }], car, 0, 5, 2.5).steer) < 1e-9);
+});
+
+test('steering by hand pauses auto-steer and hides the arrow, and it comes back 0.4 s after the keys are let go', () => {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  let enteredAt = -1;
+  const released = () => enteredAt + 0.7;
+  const frames = rideTurn(lock, graph, start, 8, 6, {
+    on: (t, l) => { if (t === 0) l.press('left'); if (l.mode === 'free' && enteredAt < 0) enteredAt = t; },
+    manual: t => (enteredAt >= 0 && t >= enteredAt + 0.2 && t < released() ? -1 : 0), // D held from 0.2 s to 0.7 s into the zone
+  });
+  const inZone = frames.filter(f => f.mode === 'free');
+  assert.ok(inZone.length > 20);
+  // Before the keys: auto-steer is on and the arrow shows the left turn.
+  assert.ok(frames.filter(f => f.mode === 'free' && f.t >= enteredAt && f.t < enteredAt + 0.2).every(f => f.auto !== null && f.arrow));
+  // Held: no auto-steer, no arrow.
+  const held = frames.filter(f => f.mode === 'free' && f.t >= enteredAt + 0.25 && f.t < released());
+  assert.ok(held.length > 5 && held.every(f => f.auto === null && !f.arrow));
+  // Let go: still manual for 0.4 s, then auto-steer is back.
+  const wait = frames.filter(f => f.mode === 'free' && f.t > released() + DT && f.t < released() + 0.35);
+  assert.ok(wait.length > 3 && wait.every(f => f.auto === null && !f.arrow), 'the wheel stays free for 0.4 s');
+  const back = frames.find(f => f.mode === 'free' && f.t >= released() + 0.45);
+  assert.ok(back && back.auto !== null, 'auto-steer is back');
+  // Steering right for half a second turned the car about 54 degrees toward the straight road, which is now the exit it points at.
+  const end = frames[frames.length - 1].pose;
+  assert.ok(distanceToRoads(end, [SERVICE_NORTH]) < 2.5 && -end.z < 18, 'left the T on the straight road, not the side road');
+  assert.equal(lock.intent, null);
+});
+
+test('a tap in the zone moves the target one exit left or right and stops at the ends', () => {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  // The T's exits seen from the south-bound approach, sharpest left to sharpest right: 153 deg (back north), 74 deg
+  // (east) and -23 deg (straight on, no arrow: it is under a 30 degree turn). With a left turn queued the target is 74.
+  const taps: Side[] = ['left', 'left', 'right', 'right', 'right'];
+  const tappedAt: number[] = [];
+  let enteredAt = -1;
+  const frames = rideTurn(lock, graph, start, 5, 8, {
+    on: (t, l) => {
+      if (t === 0) l.press('left');
+      if (l.mode !== 'free') return;
+      const frame = Math.round(t / DT);
+      if (enteredAt < 0) enteredAt = frame;
+      const k = (frame - enteredAt - 1) / 2;
+      if (k >= 0 && Number.isInteger(k) && k < taps.length) { l.tap(taps[k]); tappedAt.push(frame); }
+    },
+  });
+  assert.equal(tappedAt.length, taps.length);
+  assert.equal(frames[enteredAt - 1 + 1].exitDeg, 74); // the target before any tap
+  // Heading of the lane where the exit's road crosses the zone edge, a few degrees off the branch heading.
+  const shown = tappedAt.map(i => frames[i].exitDeg);
+  assert.deepEqual(shown.map(d => d === null ? null : Math.abs(d - 153) < 12 ? 153 : d), [153, 153, 74, null, null]);
+  assert.ok(tappedAt.every(i => frames[i].mode === 'free'), 'still deciding in the zone through every tap');
+});
+
+test('with no keys the car passes the T straight on and takes the smallest turn at the crossing', () => {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  const frames = rideTurn(lock, graph, start, 14, 12);
+  const end = frames[frames.length - 1].pose;
+  assert.ok(distanceToRoads(end, [JABOTINSKY_EAST]) < 2.5, `${distanceToRoads(end, [JABOTINSKY_EAST])} m from eastbound Jabotinsky`);
+  assert.ok(Math.abs(rightOfRoad(end, JABOTINSKY_EAST)) < 0.4, 'on the center line of the one-way road');
+});
+
+test('tapping before the crossing picks the carriageway on that side, and never drives one against its direction', () => {
+  const graph = zonedGraphOf(AREA);
+  for (const [side, road, other] of [['right', JABOTINSKY_WEST, JABOTINSKY_EAST], ['left', JABOTINSKY_EAST, JABOTINSKY_WEST]] as const) {
+    const lock = createRoadLock();
+    const start = lock.engage({ x: 9, z: -14, heading: headingXY(-9, -15) }, graph)!; // on the service road, just before the crossing
+    const frames = rideTurn(lock, graph, start, 12, 10, { on: (t, l) => { if (t === 0) l.press(side); } });
+    const outAt = frames.findIndex((f, i) => i > firstFree(frames as never) && f.mode === 'locked');
+    const onRoad = frames.slice(outAt).filter(f => distanceToRoads(f.pose, [road]) < 2.5 && distanceToRoads(f.pose, [other]) > 5);
+    assert.ok(onRoad.length > 20, `${side}: drove along its carriageway (${onRoad.length} frames)`);
+    assert.ok(frames.some(f => f.mode === 'free'), 'went through the crossing as a zone');
+  }
+});
+
+test('leaving a zone runs the lookahead at once, and the turn speed stays through a gap under 40 m', () => {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  // The T and the crossing are about 14 m apart along the service road.
+  const frames = rideTurn(lock, graph, start, 14, 16);
+  const out = frames.findIndex((f, i) => i > firstFree(frames as never) && f.mode === 'locked');
+  assert.ok(out > 0);
+  assert.equal(frames[out + 1].arrow, true, 'the crossing is already targeted a frame after the T');
+  assert.ok(Math.abs(frames[out + 1].exitDeg! - 50) <= 1, `smallest turn at the crossing: east, ${frames[out + 1].exitDeg}`); // the lane heading where the carriageway crosses the zone edge
+  assert.ok(frames[out].cap !== undefined && frames[out + 1].cap !== undefined, 'a cap goes on through the gap');
+  assert.ok(frames[out + 6].speed < frames[out].speed, 'braking through the gap');
+  const second = frames.findIndex((f, i) => i > out && f.mode === 'free');
+  // Braking is gentle (6 m/s²), so a 14 m gap isn't enough to get from 50 to 25 km/h; the cap holds on through the crossing.
+  assert.ok(second > out && frames[second].speed < frames[out].speed - 4, `${frames[second]?.speed * 3.6} km/h entering the crossing`);
+  const done = frames.findIndex((f, i) => i > second && f.mode === 'locked');
+  assert.ok(done > second && frames[done].speed <= frames[second].cap! + 0.05, `${frames[done]?.speed * 3.6} km/h leaving it`);
+});
+
+test('the cap lifts after a gap longer than 40 m, and the car speeds up again', () => {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage({ x: 9, z: -14, heading: headingXY(-9, -15) }, graph)!;
+  const frames = rideTurn(lock, graph, start, 14, 8, { on: (t, l) => { if (t === 0) l.press('left'); } });
+  const out = frames.findIndex((f, i) => i > firstFree(frames as never) && f.mode === 'locked');
+  assert.ok(out > 0);
+  assert.equal(frames[out + 1].cap, undefined);
+  assert.ok(frames[frames.length - 1].speed > 13, `${frames[frames.length - 1].speed} m/s at the end`);
+});
+
+test('the turn speed is reached at the zone edge: braking starts at the braking distance', () => {
+  const graph = zonedGraphOf(AREA);
+  const zone = centerOf(graph, [12, 22]);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  const frames = rideTurn(lock, graph, start, 14, 6, { on: (t, l) => { if (t === 0) l.press('left'); } });
+  assert.equal(frames[0].cap, undefined, 'far from the turn the car is not slowed');
+  const braking = frames.findIndex(f => f.cap !== undefined);
+  assert.ok(braking > 0);
+  const f = frames[braking];
+  const toEdge = Math.hypot(f.pose.x - zone.x, f.pose.z - zone.z) - zone.radius;
+  const wanted = brakingDistance(f.speed, f.cap!) + 2;
+  assert.ok(Math.abs(toEdge - wanted) < 3, `started ${toEdge} m from the edge, wanted about ${wanted}`);
+  const entered = firstFree(frames as never);
+  assert.ok(frames[entered].speed <= f.cap! + 0.3, `${frames[entered].speed * 3.6} km/h at the zone edge`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// The route through a roundabout follows the ring.
+
+/** The path of the arrow the lock shows on the first frame it shows one, for a car coming down Moshe Dayan to the roundabout. */
+function roundaboutArrow(intent: Side | null) {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage({ x: -40, z: -83, heading: headingXY(-5, -20) }, graph)!;
+  let found: ReturnType<RoadLock['arrow']> = null;
+  let path: { x: number; z: number }[] = [];
+  rideTurn(lock, graph, start, 10, 3, {
+    on: (t, l) => {
+      if (t === 0 && intent) l.press(intent);
+      const arrow = l.arrow();
+      if (!found && arrow) { found = arrow; path = arrow.path; }
+    },
+  });
+  assert.ok(found, 'the roundabout shows an arrow');
+  return path;
+}
+
+test('the arrow through a roundabout follows the ring in its direction, not straight across the island', () => {
+  for (const intent of ['left', 'right', null] as const) {
+    const path = roundaboutArrow(intent);
+    const first = path[0], last = path[path.length - 1];
+    // Every point of the arrow is on the ring road, except the stretches that are still on the roads leading in and out.
+    const off = path.filter(p => Math.hypot(p.x - first.x, p.z - first.z) > 8 && Math.hypot(p.x - last.x, p.z - last.z) > 8)
+      .map(p => distanceToRoads({ x: p.x, z: p.z, heading: 0 }, [ROUNDABOUT]));
+    assert.ok(Math.max(0, ...off) < 3.5, `${intent}: the arrow strays ${Math.max(0, ...off).toFixed(1)} m from the ring`);
+  }
+});
+
+const centerOfNearest = (graph: RoadGraph, p: { x: number; z: number }) =>
+  graph.zones.reduce((best, z) => (Math.hypot(z.x - p.x, z.z - p.z) - z.radius < Math.hypot(best.x - p.x, best.z - p.z) - best.radius ? z : best));
+
+const distanceToPath = (p: { x: number; z: number }, path: { x: number; z: number }[]) => {
+  let best = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1], dx = b.x - a.x, dz = b.z - a.z, length2 = dx * dx + dz * dz;
+    const t = length2 === 0 ? 0 : Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.z - a.z) * dz) / length2));
+    best = Math.min(best, Math.hypot(p.x - (a.x + dx * t), p.z - (a.z + dz * t)));
+  }
+  return best;
+};
+
+test('the roundabout arrow runs around the ring the way its one-way traffic goes', () => {
+  for (const intent of ['left', 'right', null] as const) {
+    const path = roundaboutArrow(intent);
+    const ring = ROUNDABOUT.coords.map(([x, y]) => ({ x, z: -y }));
+    let ringMeters = 0;
+    for (let i = 0; i < path.length - 1; i++) {
+      const mid = { x: (path[i].x + path[i + 1].x) / 2, z: (path[i].z + path[i + 1].z) / 2 };
+      // The ring segment under this stretch of the arrow, and whether the arrow runs along it.
+      let best = Infinity, along = 0;
+      for (let k = 0; k < ring.length - 1; k++) {
+        const d = distanceToPath(mid, [ring[k], ring[k + 1]]);
+        if (d < best) { best = d; along = (ring[k + 1].x - ring[k].x) * (path[i + 1].x - path[i].x) + (ring[k + 1].z - ring[k].z) * (path[i + 1].z - path[i].z); }
+      }
+      const atMember = [[-49, 55], [-63, 48], [-54, 33], [-42, 41]].some(([x, y]) => Math.hypot(mid.x - x, mid.z + y) < 4); // where the roads in and out join the ring
+      if (best < 1.5 && !atMember) { ringMeters += Math.hypot(path[i + 1].x - path[i].x, path[i + 1].z - path[i].z); assert.ok(along > 0, `${intent}: runs against the ring at ${mid.x.toFixed(1)}, ${mid.z.toFixed(1)}`); }
+    }
+    assert.ok(ringMeters > 5, `${intent}: only ${ringMeters.toFixed(1)} m of the arrow is on the ring`);
+  }
+});
+
+test('auto-steer drives the drawn arrow: the car stays on it through every turn and leaves on its exit', () => {
+  const graph = zonedGraphOf(AREA);
+  const cases: { name: string; start: Pose; intent: Side | null; exits: Road[] }[] = [
+    { name: 'roundabout left', start: { x: -40, z: -83, heading: headingXY(-5, -20) }, intent: 'left', exits: [JABOTINSKY_EAST] },
+    { name: 'roundabout right', start: { x: -40, z: -83, heading: headingXY(-5, -20) }, intent: 'right', exits: [JABOTINSKY_NW] },
+    { name: 'roundabout straight on', start: { x: -40, z: -83, heading: headingXY(-5, -20) }, intent: null, exits: [JABOTINSKY_EAST, JABOTINSKY_NW, MOSHE_DAYAN] },
+    { name: 'T left', start: SOUTH_ON_SERVICE, intent: 'left', exits: [SERVICE_T] },
+    { name: 'crossing left', start: { x: 9, z: -14, heading: headingXY(-9, -15) }, intent: 'left', exits: [JABOTINSKY_EAST] },
+    { name: 'crossing right', start: { x: 9, z: -14, heading: headingXY(-9, -15) }, intent: 'right', exits: [JABOTINSKY_WEST] },
+  ];
+  for (const c of cases) {
+    const lock = createRoadLock();
+    const start = lock.engage(c.start, graph)!;
+    let drawn: { x: number; z: number }[] | null = null;
+    const frames = rideTurn(lock, graph, start, 14, 30, {
+      on: (t, l) => { if (t === 0 && c.intent) l.press(c.intent); if (l.mode === 'free' && !drawn && l.arrow()) drawn = [...l.arrow()!.path]; },
+    });
+    assert.ok(drawn, `${c.name}: an arrow was drawn`);
+    const first = firstFree(frames as never), out = frames.findIndex((f, i) => i > first && f.mode === 'locked');
+    const zoneOf = centerOfNearest(graph, frames[first].pose);
+    const inZone = frames.slice(first, out).filter(f => Math.hypot(f.pose.x - zoneOf.x, f.pose.z - zoneOf.z) <= zoneOf.radius); // inside the first zone's circle
+    let worst = 0;
+    for (const f of inZone) worst = Math.max(worst, distanceToPath(f.pose, drawn!));
+    assert.ok(worst < 1, `${c.name}: the car strays ${worst.toFixed(2)} m from the arrow`);
+    assert.ok(out > first, `${c.name}: left the zone`);
+    const later = frames[Math.min(frames.length - 1, out + 12)].pose;
+    assert.ok(c.exits.some(r => distanceToRoads(later, [r]) < 2.5), `${c.name}: left on the wrong road`);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// U-turns at dead ends.
+
+/** From the service road south into the T, left to the side road, which ends in a dead end; a turn is queued for each. */
+function deadEndRide(second: Side | null, seconds = 22) {
+  const graph = zonedGraphOf(AREA);
+  const lock = createRoadLock();
+  const start = lock.engage(SOUTH_ON_SERVICE, graph)!;
+  let leftT = false, sawFree = false;
+  let drawn: { x: number; z: number }[] | null = null;
+  let zoneAt = { x: 0, z: 0, radius: 0 };
+  const frames = rideTurn(lock, graph, start, 10, seconds, {
+    on: (t, l) => {
+      if (t === 0) l.press('left');
+      if (l.mode === 'free') sawFree = true;
+      if (l.mode === 'locked' && !leftT && sawFree) { leftT = true; if (second) l.press(second); } // out of the T: queue the turn for the dead end
+      if (l.mode === 'free' && leftT && !drawn && l.arrow()) { drawn = [...l.arrow()!.path]; zoneAt = centerOfNearest(graph, { x: 25, z: 2 }); }
+    },
+  });
+  return { frames, drawn: drawn as { x: number; z: number }[] | null, zoneAt, lock, graph };
+}
+
+test('a turn queued before a dead end draws a U and drives it, coming back out the way it went in', () => {
+  for (const side of ['left', 'right'] as const) {
+    const { frames, drawn, zoneAt } = deadEndRide(side);
+    assert.ok(drawn, `${side}: an arrow is drawn at the dead end`);
+    // The arrow goes in and comes back out: it ends heading the opposite way, in the lane on the other side of the road.
+    const start = drawn![0], end = drawn![drawn!.length - 1];
+    assert.ok(Math.hypot(end.x - start.x, end.z - start.z) < 8, `${side}: a U (${Math.hypot(end.x - start.x, end.z - start.z).toFixed(1)} m between its ends)`);
+    const inside = frames.filter(f => Math.hypot(f.pose.x - zoneAt.x, f.pose.z - zoneAt.z) <= zoneAt.radius && f.mode === 'free');
+    assert.ok(inside.length > 10);
+    assert.ok(Math.max(...inside.map(f => f.speed)) <= TURN_AROUND_CAP + 0.35, `${side}: crawls through the U (${(Math.max(...inside.map(f => f.speed)) * 3.6).toFixed(0)} km/h)`);
+    const worst = Math.max(...inside.map(f => distanceToPath(f.pose, drawn!)));
+    assert.ok(worst < 1.1, `${side}: the car strays ${worst.toFixed(2)} m from the U`);
+    // Out of the dead end the car is on the side road again, going back toward the T, in its right-hand lane.
+    const out = frames.findIndex((f, i) => i > 0 && f.mode === 'locked' && frames[i - 1].mode === 'free' && Math.hypot(f.pose.x - zoneAt.x, f.pose.z - zoneAt.z) < 12 && f.t > 5);
+    assert.ok(out > 0, `${side}: left the dead end`);
+    const back = frames[Math.min(frames.length - 1, out + 20)].pose;
+    assert.ok(distanceToRoads(back, [SERVICE_T]) < 2.5, `${side}: back on the side road`);
+    assert.ok(Math.abs(Math.abs(rightOfRoad(back, SERVICE_T)) - 1) < 0.4, `${side}: in a lane of the side road (${rightOfRoad(back, SERVICE_T).toFixed(2)})`);
+    assert.ok(Math.cos(back.heading) < 0, `${side}: heading back north toward the T`); // z shrinks going north
+  }
+});
+
+test('without a turn queued the car still stops at the dead end, and a turn asked for with no way back leaves it queued', () => {
+  const { frames } = deadEndRide(null, 20);
+  const last = frames[frames.length - 1];
+  assert.equal(last.mode, 'free');
+  assert.equal(last.speed, 0);
+  // The U-turn target only exists with an intent.
+  const graph = zonedGraphOf(AREA);
+  const deadEnd = centerOf(graph, [25, -2]);
+  assert.equal(pickTarget(deadEnd, headingXY(2, -18), null), null);
+  const target = pickTarget(deadEnd, headingXY(2, -18), 'left')!;
+  assert.ok(target.byIntent && Math.abs(Math.abs(target.turn) - Math.PI) < 0.3, `turn ${target.turn}`);
+  assert.equal(pickTarget(deadEnd, headingXY(2, -18), 'right')!.exit, target.exit);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Turn speed from the route's curvature.
+
+const arc = (radius: number, degrees: number) => Array.from({ length: Math.round(degrees) + 1 }, (_, i) => {
+  const a = (i * Math.PI) / 180;
+  return { x: radius * Math.sin(a), z: radius * (1 - Math.cos(a)) };
+});
+
+test('the route speed comes from its average radius, held down by its tightest kink', () => {
+  for (const radius of [25, 40]) { near(tightestRadius(arc(radius, 90)), radius, radius * 0.03); near(averageRadius(arc(radius, 90)), radius, radius * 0.05); }
+  assert.equal(tightestRadius([{ x: 0, z: 0 }, { x: 0, z: 30 }]), Infinity);
+  assert.equal(averageRadius([{ x: 0, z: 0 }, { x: 0, z: 30 }]), Infinity);
+  near(routeSpeed(arc(25, 90)) * 3.6, Math.sqrt(6 * 25) * 3.6, 2);   // 44 km/h round a 25 m bend
+  assert.ok(routeSpeed(arc(10, 90)) < routeSpeed(arc(25, 90)), 'tighter is slower');
+  assert.equal(routeSpeed(arc(2, 90)), ROUTE_SPEED_MIN);             // tight: never below 15 km/h
+  assert.equal(routeSpeed(arc(200, 40)), ROUTE_SPEED_MAX);           // wide open: 50 km/h
+  assert.equal(routeSpeed([{ x: 0, z: 0 }, { x: 0, z: 30 }]), ROUTE_SPEED_MAX);
+  // A gentle bend with one sharp kink in it is held down by the kink.
+  const kinked = [...arc(60, 30), ...arc(6, 90).slice(1).map(p => ({ x: p.x + 30, z: p.z + 8 }))];
+  assert.ok(routeSpeed(kinked) < Math.sqrt(6 * averageRadius(kinked)), 'the kink, not the average, sets the speed');
+});
+
+test('a wide roundabout is taken faster than a tight T, and a turn that is not one has no cap', () => {
+  const graph = zonedGraphOf(AREA);
+  const speedAt = (start: Pose, intent: Side | null, from: number) => {
+    const lock = createRoadLock();
+    const first = lock.engage(start, graph)!;
+    const frames = rideTurn(lock, graph, first, 14, 8, { on: (t, l) => { if (t === 0 && intent) l.press(intent); } });
+    return frames.slice(from).find(f => f.mode === 'free')?.cap;
+  };
+  const tight = speedAt(SOUTH_ON_SERVICE, 'left', 0);                                   // the T: 5 m radius zone
+  const ring = speedAt({ x: -40, z: -83, heading: headingXY(-5, -20) }, 'right', 0);    // the 4-junction roundabout
+  assert.ok(tight !== undefined && ring !== undefined);
+  assert.ok(ring! >= tight!, `${ring! * 3.6} km/h round, ${tight! * 3.6} km/h at the T`);
+  assert.equal(speedAt(SOUTH_ON_SERVICE, null, 0), undefined, 'straight on through the T: no cap');
 });

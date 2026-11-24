@@ -8,15 +8,18 @@
 <body>
   <div id="status">Loading town…</div>
 
+  <div id="road-status" aria-live="polite"><span id="road-pill" hidden>ROAD</span><span id="turn-chip" hidden></span></div>
+
   <div id="hud">
     <b>Town Navigator</b><br />
     W / ↑ accelerate · S / ↓ brake/reverse<br />
     A D / ← → steer · C switch camera<br />
+    With stick to roads: tap A D to choose the turn, hold to steer<br />
     Click a building for details<br />
     <kbd>P</kbd> settings · <kbd>V</kbd> building view<br />
     <kbd>M</kbd> performance panel · <kbd>F</kbd> favorites · <kbd>B</kbd> tile map<br />
     <kbd>R</kbd> stick to roads<br />
-    Speed: <span id="speed">0</span> km/h <span id="road-pill" hidden>ROAD</span>
+    Speed: <span id="speed">0</span> km/h
   </div>
 
   <div id="street" dir="rtl" hidden></div>
@@ -108,7 +111,7 @@
         <p class="facts" id="settings-limit-facts"></p>
         <button class="link" type="button" id="settings-limit-reset">Reset to 79 km/h</button>
         <label class="check" for="settings-road-lock"><input type="checkbox" id="settings-road-lock" aria-keyshortcuts="R"> Stick to roads</label>
-        <p class="hint">The car follows the road and goes straight on at junctions. <kbd>W</kbd> <kbd>S</kbd> set the speed. Shortcut <kbd>R</kbd>.</p>
+        <p class="hint">The car follows the road. <kbd>W</kbd> <kbd>S</kbd> set the speed, and tapping <kbd>A</kbd> <kbd>D</kbd> picks the turn at the next junction. Shortcut <kbd>R</kbd>.</p>
       </fieldset>
       <fieldset>
         <legend>Car</legend>

@@ -12,6 +12,7 @@ import { createBuildingTooltip } from './hud/buildingTooltip.ts';
 import { createCompass } from './hud/compass.ts';
 import { createFavoritesDialog } from './hud/favoritesDialog.ts';
 import { createJunctionDebug } from './hud/junctionDebug.ts';
+import { createTurnIntent } from './hud/turnIntent.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
 import { createPerfMonitor } from './hud/perfMonitor.ts';
 import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
@@ -78,6 +79,13 @@ async function main(): Promise<void> {
       get hold() { return roadLock.hold; },
       step: (pose, speed, dt) => roadLock.step(pose, speed, dt, graphNear()),
       observe: (pose, speed, dt) => roadLock.observe(pose, speed, dt, graphNear()),
+      get intent() { return roadLock.intent; },
+      get speedCap() { return roadLock.speedCap; },
+      press: side => roadLock.press(side),
+      tap: side => roadLock.tap(side),
+      steerHeld: held => roadLock.steerHeld(held),
+      autoSteer: (pose, speed) => roadLock.autoSteer(pose, speed),
+      arrow: () => roadLock.arrow(),
     });
     tiles.update(car.position);
 
@@ -94,6 +102,7 @@ async function main(): Promise<void> {
       debugLog.event('tiles', counts);
     });
     const speedDisplay = createSpeedDisplay();
+    const turnIntent = createTurnIntent(scene);
 
     // --- Stick to roads
     const carPose = () => ({ x: car.position.x, z: car.position.z, heading: car.heading });
@@ -336,6 +345,8 @@ async function main(): Promise<void> {
       locationReadout.update(dt, car.position);
       tiles.updateLabels(car.heading);
       speedDisplay.setRoadLock(roadLock.active, roadLock.mode === 'free');
+      const choosing = roadLock.active && car.speed >= 0; // reversing ignores the queued turn
+      turnIntent.update(choosing ? roadLock.intent : null, choosing ? roadLock.arrow() : null, t0 / 1000);
       if (junctionDebug.visible) {
         showRoadGraph();
         junctionDebug.setCandidate(roadLock.candidate());
