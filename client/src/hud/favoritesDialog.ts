@@ -16,6 +16,7 @@ export interface FavoritesDialogOptions {
 
 export interface FavoritesDialog {
   readonly isOpen: boolean;
+  open(): void;
 }
 
 function newId(): string {
@@ -250,5 +251,5 @@ export function createFavoritesDialog(options: FavoritesDialogOptions): Favorite
     if (dialog.open) dialog.close(); else open();
   });
 
-  return { get isOpen() { return dialog.open; } };
+  return { get isOpen() { return dialog.open; }, open };
 }

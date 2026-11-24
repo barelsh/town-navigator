@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import './styles.css';
-import { fetchTileIndex, fetchTown } from './api/townApi.ts';
+import { fetchRoute, fetchTileIndex, fetchTown } from './api/townApi.ts';
 import { createFollowCamera } from './camera/followCamera.ts';
 import { createCarController } from './car/carController.ts';
 import { createCarModel } from './car/carModel.ts';
@@ -18,6 +18,9 @@ import { createPerfMonitor } from './hud/perfMonitor.ts';
 import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
 import { createTileMap } from './hud/tileMap.ts';
 import { createLocationReadout } from './hud/location.ts';
+import { createNavCard } from './hud/navCard.ts';
+import { createNavigationDialog } from './hud/navigationDialog.ts';
+import { createNavigation } from './nav/navigation.ts';
 import { createStreetReadout } from './hud/streetReadout.ts';
 import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
@@ -48,6 +51,7 @@ async function main(): Promise<void> {
     };
     setMonitoring(monitoringEnabled(settings));
     let appearance = appearanceOf(settings);
+    let speedLimitKmh = speedLimitOf(settings);
     const kit = createTownKit(renderer);
     const streaming = TOWN_LOAD_MODE === 'tiles';
     status.textContent = streaming ? 'Loading tiles…' : 'Loading town…';
@@ -165,12 +169,13 @@ async function main(): Promise<void> {
       },
       bounds: tiles.index.bbox,
       onOpenChange: open => onDialogOpenChange(open),
-      onSave: ({ startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring, roadLock: wantsRoadLock }) => {
-        debugLog?.event('settingsSaved', { startPoint, speedLimitKmh, vehicle, appearance: newAppearance, monitoring, roadLock: wantsRoadLock });
+      onSave: ({ startPoint, speedLimitKmh: newLimitKmh, vehicle, appearance: newAppearance, monitoring, roadLock: wantsRoadLock }) => {
+        debugLog?.event('settingsSaved', { startPoint, speedLimitKmh: newLimitKmh, vehicle, appearance: newAppearance, monitoring, roadLock: wantsRoadLock });
         const latest = loadSettings();
         const previous = townSettings(latest, DEFAULT_TOWN).startPoint;
         latest.towns[DEFAULT_TOWN] = { ...latest.towns[DEFAULT_TOWN], startPoint };
-        latest.speedLimitKmh = speedLimitKmh;
+        latest.speedLimitKmh = newLimitKmh;
+        speedLimitKmh = newLimitKmh;
         latest.vehicle = vehicle;
         latest.appearance = newAppearance;
         latest.monitoring = monitoring;
@@ -178,7 +183,7 @@ async function main(): Promise<void> {
         latest.roadLock = setRoadLock(wantsRoadLock); // stays off, and is saved off, without a road nearby
         appearance = newAppearance;
         tiles.setAppearance(newAppearance);
-        car.setSpeedLimit(speedLimitKmh);
+        car.setSpeedLimit(newLimitKmh);
         // Only a new starting point moves the car; a new limit alone must not interrupt driving.
         if (startPoint.x !== previous.x || startPoint.y !== previous.y) {
           const world = toWorld(startPoint);
@@ -187,6 +192,7 @@ async function main(): Promise<void> {
             tiles.update(car.position);
             reseedRoadLock();
             followCamera.jumpTo(car.position, car.heading);
+            navigation.reroute('teleport', true);
           });
         }
         if (vehicle !== carModel.spec.id) {
@@ -226,7 +232,31 @@ async function main(): Promise<void> {
         tiles.update(car.position);
         reseedRoadLock();
         followCamera.jumpTo(car.position, car.heading);
+        navigation.reroute('teleport', true);
       },
+    });
+
+    // --- Navigation (guidance only: the route never steers the car)
+    const navigation = createNavigation({
+      requestRoute: (body, signal) => fetchRoute(DEFAULT_TOWN, body, signal),
+      pose: carPose,
+      onEvent: debugLog ? (kind, data) => debugLog.event(kind, data) : undefined,
+    });
+    const navCard = createNavCard({ onStop: () => navigation.stop() });
+    const navigationDialog = createNavigationDialog({
+      load: () => favoritesOf(loadSettings(), DEFAULT_TOWN),
+      carPoint: () => fromWorld(car.position),
+      active: () => {
+        const destination = navigation.destination;
+        const { state } = navigation; // arrived or failed: done, even while its message still shows
+        if (!destination || (state !== 'routing' && state !== 'active' && state !== 'rerouting')) return null;
+        const route = navigation.route;
+        return { id: destination.id, name: destination.name, left: route ? Math.max(0, route.distance - navigation.along) : null };
+      },
+      navigate: favorite => navigation.start(favorite),
+      stop: () => navigation.stop(),
+      openFavorites: () => favorites.open(),
+      onOpenChange: onDialogOpenChange,
     });
 
     const tileMap = createTileMap({
@@ -251,19 +281,19 @@ async function main(): Promise<void> {
       if (e.code === ROAD_LOCK_SHORTCUT && plainKey) {
         if (settingsDialog.isOpen) {
           settingsDialog.toggleRoadLock(); // applies on Save, like the other fields
-        } else if (!favorites.isOpen && !tileMap.isOpen) {
+        } else if (!favorites.isOpen && !tileMap.isOpen && !navigationDialog.isOpen) {
           const on = setRoadLock(!roadLock.active, { announce: true });
           saveSettings({ ...loadSettings(), roadLock: on }); // if storage fails the mode still toggles
         }
       }
-      if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) {
+      if (e.code === APPEARANCE_SHORTCUT && plainKey && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen && !navigationDialog.isOpen) {
         // Flips the saved building view; the dialog's Buildings choice stays the way to pick one explicitly.
         appearance = appearance === 'plain' ? 'realistic' : 'plain';
         debugLog?.event('appearance', { appearance });
         tiles.setAppearance(appearance);
         saveSettings({ ...loadSettings(), appearance });
       }
-      if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen) tooltip.close();
+      if (e.code === 'Escape' && !settingsDialog.isOpen && !favorites.isOpen && !tileMap.isOpen && !navigationDialog.isOpen) tooltip.close();
     });
 
     /** Development: the L key writes the flight recorder to logs/. */
@@ -347,6 +377,9 @@ async function main(): Promise<void> {
       speedDisplay.setRoadLock(roadLock.active, roadLock.mode === 'free');
       const choosing = roadLock.active && car.speed >= 0; // reversing ignores the queued turn
       turnIntent.update(choosing ? roadLock.intent : null, choosing ? roadLock.arrow() : null, t0 / 1000);
+      navigation.update(dt, carPose(), car.speed, speedLimitKmh / 3.6);
+      navCard.update(dt, navigation.view());
+      navigationDialog.setActive(navigation.state !== 'idle');
       if (junctionDebug.visible) {
         showRoadGraph();
         junctionDebug.setCandidate(roadLock.candidate());

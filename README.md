@@ -45,7 +45,7 @@ data/         input files and scripts
 ### controls
 - `W` / `↑` accelerate, `S` / `↓` brake and reverse, `A` `D` / `←` `→` steer
 - `C` switch camera, click a building for details
-- `P` settings, `V` building view, `M` performance panel, `F` favorites
+- `P` settings, `V` building view, `M` performance panel, `F` favorites, `N` navigation (see below)
 - `R` stick to roads: the car stays on its road and `W` / `S` only set the speed (see below)
 - `L` (development only) save the debug log, see below
 - With the performance panel on (`M`), a road graph overlay draws on the nearby roads: an orange ring per junction zone (red for dead ends), a disc per junction and a tick per exit, green if you can drive out on it and gray if it is one-way in. Close junctions, such as roundabouts and dual-carriageway crossings, share one zone.
@@ -68,6 +68,13 @@ In development (`npm run dev`) the client keeps a flight recorder: the last ~100
 - Inside the zone the car steers itself onto the target exit and slows to 25 km/h, braking at 6 m/s² from the braking distance before the zone. A zone that follows within 40 m of the exit it just left keeps the 25 km/h cap through the gap. A quick tap (under 250 ms) of `A` or `D` inside the zone moves the target one exit to that side, so in a roundabout you tap until the arrow points where you want. Holding a key longer than that steers by hand, as before, and hides the arrow; 0.4 s after you let go, the car heads for the exit it now points at. The arrow is the route, and auto-steer drives exactly it (it steers toward a point a few meters ahead on the arrow). Through a single junction it is a smooth curve from the entry lane to the exit lane. Through a zone of several junctions, a roundabout or a dual-carriageway crossing, it follows the real roads between them in their direction of travel, so a roundabout is driven around its ring and a left turn there goes the long way around.
 - U-turn at a dead end: tap `A` or `D` before a dead end and the arrow draws a U, in the lane you drive in and out along the lane of the road coming back. The car goes through it at 20 km/h with a harder steering lock than the keys give, and leaves the way it came. With no turn queued the car stops at the dead end, as before.
 - Building collision is skipped while it is on, since the road decides where the car can be. Turning it off hands steering and collision back.
+
+### navigation
+- Press `N`, or the arrow button at the top of the corner buttons, to open the Navigation dialog. It lists the town's favorites (save them with `F`) with their straight-line distance from the car. Navigate asks the server for the shortest legal route from the car (`POST /api/towns/:id/route`, see Routing) and closes the dialog.
+- Guidance only: the route never steers the car. A card at the top of the screen names the next turn (`⟲ Roundabout, 2nd exit`, `↰ Turn left`, ...) with the road it leads onto, counts down the meters to it, and shows the destination with the distance and time left. When the turn after it comes within 80 m, a `then` line names it too. The card pulses 150 m and 50 m before each turn. Straight-throughs are only named when another way there is straighter. With Stick to roads on, you still choose each turn with `A` `D`.
+- Leaving the route (more than 20 m off it for 2 s, or driving against it for 3 s) asks for a new route from where the car is (`Rerouting…`), at most every 3 s. Go to on a favorite, or a new starting point, reroutes at once.
+- Within 20 m of the destination the card shows `Arrived at ...` for 4 s and navigation ends. The card's `×`, or Stop in the dialog, ends it at any time. While it runs, the arrow button has a cyan ring.
+- If no road leads near the favorite, the card shows the server's message for 6 s. If the server can't be reached it retries after 2, 4 and 8 s. Navigation is not saved: a reload starts without it.
 
 ### tile streaming
 - The client fetches `/api/towns/:id/index` and keeps the 3 x 3 tiles around the car's tile loaded, which reaches 500 m past the car, beyond the 450 m fog.
@@ -94,7 +101,7 @@ curl -s -X POST localhost:3000/api/towns/rosh_haayin/route -H 'content-type: app
 
 - The server builds the town's road graph from `data/town_meters_<town>.geojson` on the first route request (roads cut at every junction and dead end, by OSM node id), keeps it in memory, and rebuilds it when the file changes. Rosh HaAyin: 2,370 nodes and 4,636 directed edges, built in about 20 ms.
 - The search is edge-based A* with the straight line to the destination as its heuristic, so it returns the same shortest route as Dijkstra while settling far fewer edges; a route takes a few milliseconds.
-- Respected: one-way roads (`oneway`, `junction=roundabout`, the same rules as the tiler, shared in `data/scripts/roadRules.js`), turn restrictions with a via node, and no U-turns except at dead ends. The car joins the road in the direction it faces; turning back costs 50 m.
+- Respected: one-way roads (`oneway`, `junction=roundabout`, the same rules as the tiler, shared in `data/scripts/roadRules.js`), turn restrictions with a via node, and no U-turns except at dead ends. The car joins the road in the direction it faces (standing on a junction node, it counts as arriving there); turning back costs 50 m, and such a route starts with a `uturn` maneuver at 0 m.
 - Not respected: turn restrictions with a via way (skipped and counted in the log), access tags, speeds and traffic signals. The cost is distance only.
 - Errors: 400 for a bad body, 404 for an unknown town, 422 when no road is within 60 m of either end or there is no legal route.
 

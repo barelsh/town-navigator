@@ -5,6 +5,7 @@ import { GRID_CELL, cellKey, type RouteGraph } from './graph.ts';
 export const SNAP_RADIUS = 60;      // m: no road nearer than this, no route
 export const ALIGN_MAX = 100;       // degrees between the car's bearing and a piece direction it may start along
 export const U_TURN_PENALTY = 50;   // m added to starting the other way
+export const TIE = 0.5;             // m: pieces this much farther than the nearest count as just as near
 
 /** A point on a piece: `t` meters from its a end. */
 export interface PiecePoint { piece: number; x: number; y: number; t: number; distance: number; segment: number }
@@ -85,12 +86,21 @@ export function snapStart(g: RouteGraph, x: number, y: number, bearing: number):
     if (b >= 0) seeds.push({ edge: b, cost: p.t + penalty(b), penalty: penalty(b) });
     return seeds;
   };
+  // The nearest aligned piece direction. Pieces as near as it (within TIE m: a car standing on a junction node is on all
+  // of them) are tied: prefer the one the car is arriving on (least road left on it, so every exit at the node stays
+  // open), then the one closest to its bearing.
+  let best: { p: PiecePoint; edge: number; left: number; turn: number } | null = null;
   for (const p of near) {
-    const [f, b] = edgesOf(g, p.piece);
+    if (best && p.distance > best.p.distance + TIE) break;
+    const [f, b] = edgesOf(g, p.piece), length = g.pieces[p.piece].length;
     for (const [edge, forward] of [[f, true], [b, false]] as const) {
-      if (edge >= 0 && Math.abs(wrap180(direction(p, forward) - bearing)) <= ALIGN_MAX) return { ...p, seeds: seedsOf(p, edge) };
+      const turn = Math.abs(wrap180(direction(p, forward) - bearing));
+      if (edge < 0 || turn > ALIGN_MAX) continue;
+      const left = forward ? length - p.t : p.t;
+      if (!best || left < best.left - TIE || (Math.abs(left - best.left) <= TIE && turn < best.turn)) best = { p, edge, left, turn };
     }
   }
+  if (best) return { ...best.p, seeds: seedsOf(best.p, best.edge) };
   return { ...near[0], seeds: seedsOf(near[0], null) };
 }
 

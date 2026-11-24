@@ -10,6 +10,8 @@
 
   <div id="road-status" aria-live="polite"><span id="road-pill" hidden>ROAD</span><span id="turn-chip" hidden></span></div>
 
+  <div id="nav-card" role="status" aria-live="polite" hidden></div>
+
   <div id="hud">
     <b>Town Navigator</b><br />
     W / ↑ accelerate · S / ↓ brake/reverse<br />
@@ -18,7 +20,7 @@
     Click a building for details<br />
     <kbd>P</kbd> settings · <kbd>V</kbd> building view<br />
     <kbd>M</kbd> performance panel · <kbd>F</kbd> favorites · <kbd>B</kbd> tile map<br />
-    <kbd>R</kbd> stick to roads<br />
+    <kbd>R</kbd> stick to roads · <kbd>N</kbd> navigation<br />
     Speed: <span id="speed">0</span> km/h
   </div>
 
@@ -48,6 +50,13 @@
     <div class="tip-sub"><span class="swatch" id="tip-swatch"></span><span id="tip-group"></span><span id="tip-id"></span></div>
     <dl class="tip-facts" id="tip-facts"></dl>
     <dl class="tip-tags" id="tip-tags"></dl>
+  </div>
+
+  <div id="navigation-wrap">
+    <button id="navigation-button" type="button" aria-label="Navigation" aria-keyshortcuts="N" aria-describedby="navigation-tip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M20 4L4 11l7 2 2 7z"/></svg>
+    </button>
+    <span id="navigation-tip" role="tooltip">Navigation <kbd>N</kbd></span>
   </div>
 
   <div id="tile-map-wrap">
@@ -137,6 +146,16 @@
     </div>
     <ul class="fav-list" id="favorites-list"></ul>
     <p class="fav-note" id="favorites-note" hidden></p>
+  </dialog>
+
+  <dialog id="navigation-dialog" aria-labelledby="navigation-title">
+    <div class="dlg-head"><h3 id="navigation-title">Navigate</h3><button class="close" type="button" id="navigation-close" aria-label="Close">×</button></div>
+    <div class="nav-active" id="navigation-active" hidden>
+      <span>Navigating to <b id="navigation-dest" dir="auto"></b><br /><span class="nav-left" id="navigation-left"></span></span>
+      <button class="stop" type="button" id="navigation-stop">Stop</button>
+    </div>
+    <p class="hint">Drive to a favorite along the shortest legal route. You steer, and the card and the road show each turn.</p>
+    <ul class="nav-list" id="navigation-list"></ul>
   </dialog>
 
   <dialog id="tile-map-dialog" aria-labelledby="tile-map-title">

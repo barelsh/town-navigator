@@ -77,6 +77,8 @@ test('start snapping prefers the piece direction aligned with the bearing; the o
   const back = route(g, [0, -50, 0], [0, -80]);
   near(back.distance, 30);
   assert.ok(back.points.at(-1)![1] < back.points[0][1]);
+  // ... and it starts with a U-turn where the car is
+  assert.deepEqual(back.maneuvers.map(m => [m.turn, m.along, m.nodes.length, m.inBearing, m.outBearing]), [['uturn', 0, 0, 0, 180]]);
 });
 
 test('destination in the middle of a piece: the distance includes the offset', () => {
@@ -178,4 +180,16 @@ test('rosh_haayin: centre to library is 2.8 km with 6 roundabouts (2,134 m: exit
   ]);
   near(shown[5].along, 2134, 5);
   assert.deepEqual([shown[5].x, shown[5].y].map(Math.round), [-1564, 688]);
+});
+
+test('a car standing on a junction node gets the turn there measured along the road it came by', () => {
+  // Facing south at X on the north arm's end of the crossing: the route east is a left turn here and now.
+  const g = buildGraph(townOf(CROSSING));
+  const [m] = route(g, [0, 0, 180], [50, 0]).maneuvers;
+  assert.deepEqual([m.along, m.inBearing, m.outBearing, m.turn], [0, 180, 90, 'left']);
+});
+
+test('standing on a junction node facing the way out: no maneuver at the start', () => {
+  const g = buildGraph(townOf(CROSSING));
+  assert.deepEqual(route(g, [0, 0, 0], [0, 50]).maneuvers, []);
 });

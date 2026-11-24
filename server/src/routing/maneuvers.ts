@@ -17,8 +17,11 @@ export const BEARING_SPAN = 30; // m of road a bearing is measured over
 
 type Point = [number, number];
 
-/** One directed edge as driven: from `from` to `to` meters along it. */
-interface Leg { edge: number; from: number; to: number; coords: Point[] }
+/**
+ * One directed edge as driven: from `from` to `to` meters along it. `before` is the edge up to `to` and `after` the
+ * edge from `from` on, so bearings at a junction are measured over the road even where the car starts or stops on it.
+ */
+interface Leg { edge: number; from: number; to: number; coords: Point[]; before: Point[]; after: Point[] }
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -70,7 +73,10 @@ function turnOf(angle: number): TurnKind {
 
 function legsOf(g: RouteGraph, path: PathResult): Leg[] {
   const startAt = g.edgeLength[path.seed.edge] - (path.seed.cost - path.seed.penalty);
-  const leg = (edge: number, from: number, to: number): Leg => ({ edge, from, to, coords: slice(edgeCoords(g, edge), from, to) });
+  const leg = (edge: number, from: number, to: number): Leg => {
+    const coords = edgeCoords(g, edge), length = g.edgeLength[edge];
+    return { edge, from, to, coords: slice(coords, from, to), before: slice(coords, 0, to), after: slice(coords, from, length) };
+  };
   if (!path.edges.length) return [leg(path.seed.edge, startAt, path.goal.offset)];
   const legs = path.edges.map((e, i) => leg(e, i === 0 ? startAt : 0, g.edgeLength[e]));
   legs.push(leg(path.goal.edge, 0, path.goal.offset));
@@ -127,10 +133,12 @@ export function toRoute(g: RouteGraph, path: PathResult): Route {
     group.joinNext = pieceOf(next).roundabout || short(group);
   }
 
-  const maneuvers = groups.map((grp): Maneuver => {
-    const inBearing = bearingAt(legs[grp.inLeg].coords, true);
-    const outBearing = bearingAt(legs[grp.outLeg].coords, false);
+  const maneuvers = groups.map((grp): Maneuver | null => {
+    const inBearing = bearingAt(legs[grp.inLeg].before, true);
+    const outBearing = bearingAt(legs[grp.outLeg].after, false);
     const angle = Math.round(wrap180(outBearing - inBearing));
+    // A car standing on a junction node already faces its way out when that is straight on: nothing to say there.
+    if (grp.along < 1 && !grp.ring && Math.abs(angle) < 30) return null;
     const last = grp.members[grp.members.length - 1];
     const inEdge = legs[grp.outLeg - 1].edge, outEdge = legs[grp.outLeg].edge;
     const outPiece = g.pieces[g.edgePiece[outEdge]];
@@ -157,7 +165,18 @@ export function toRoute(g: RouteGraph, path: PathResult): Route {
       ...(outPiece.name ? { road: outPiece.name } : {}),
       ...(ambiguous ? { ambiguous } : {}),
     };
-  });
+  }).filter((m): m is Maneuver => m !== null);
+
+  // Starting against the car's bearing (the seed carried the U-turn penalty): the first thing to do is turn round.
+  if (path.seed.penalty > 0) {
+    const outBearing = bearingAt(legs[0].after, false);
+    const [x, y] = legs[0].coords[0];
+    maneuvers.unshift({
+      nodes: [], x: r2(x), y: r2(y), along: 0,
+      inBearing: bearing360(outBearing + 180), outBearing: bearing360(outBearing), angle: 180, turn: 'uturn',
+      ...(pieceOf(legs[0]).name ? { road: pieceOf(legs[0]).name } : {}),
+    });
+  }
 
   const [sx, sy] = legs[0].coords[0];
   const [dx, dy] = legs[legs.length - 1].coords[legs[legs.length - 1].coords.length - 1];

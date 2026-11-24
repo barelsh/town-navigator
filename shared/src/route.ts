@@ -12,7 +12,10 @@ export type TurnKind = 'straight' | 'slight_left' | 'left' | 'sharp_left' | 'sli
 
 /** One junction on the route, or one roundabout: what to do there. */
 export interface Maneuver {
-  /** OSM node ids of the junction nodes the route passes here, in order (several for a roundabout or a dual carriageway). */
+  /**
+   * OSM node ids of the junction nodes the route passes here, in order (several for a roundabout or a dual carriageway).
+   * Empty for a U-turn at the start, where the route begins against the car's bearing.
+   */
   nodes: number[];
   /** The first of those nodes, map meters. */
   x: number;
