@@ -29,6 +29,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3ff; fon
   animation: chip-pop 0.18s ease-out;
 }
 @keyframes chip-pop { from { transform: scale(0.8); opacity: 0.4; } to { transform: scale(1); opacity: 1; } }
+#turn-chip.on-route { border-color: #22d3ee; box-shadow: 0 0 10px rgba(34, 211, 238, 0.45), 0 2px 10px rgba(0, 0, 0, 0.35); } /* the queued turn is the route's (TN-40) */
 #road-pill[hidden], #turn-chip[hidden] { display: none; }
 @media (max-width: 899px) { #road-status { top: auto; bottom: 84px; } } /* a narrow window has no room beside the info box: sit above the street name */
 @media (prefers-reduced-motion: reduce) { #turn-chip { animation: none; } }

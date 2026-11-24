@@ -13,6 +13,9 @@ import { createCompass } from './hud/compass.ts';
 import { createFavoritesDialog } from './hud/favoritesDialog.ts';
 import { createJunctionDebug } from './hud/junctionDebug.ts';
 import { createTurnIntent } from './hud/turnIntent.ts';
+import { createGlowMaterial } from './hud/glowRibbon.ts';
+import { createNavOverlay } from './hud/navOverlay.ts';
+import type { NavTurn } from './nav/navTurns.ts';
 import { createSpeedDisplay } from './hud/speed.ts';
 import { createPerfMonitor } from './hud/perfMonitor.ts';
 import { createSettingsDialog, isTyping } from './hud/settingsDialog.ts';
@@ -21,6 +24,7 @@ import { createLocationReadout } from './hud/location.ts';
 import { createNavCard } from './hud/navCard.ts';
 import { createNavigationDialog } from './hud/navigationDialog.ts';
 import { createNavigation } from './nav/navigation.ts';
+import { isShown } from './nav/routeProgress.ts';
 import { createStreetReadout } from './hud/streetReadout.ts';
 import { addGround, createStage } from './scene/stage.ts';
 import { buildingInfo } from './town/buildingInfo.ts';
@@ -106,7 +110,9 @@ async function main(): Promise<void> {
       debugLog.event('tiles', counts);
     });
     const speedDisplay = createSpeedDisplay();
-    const turnIntent = createTurnIntent(scene);
+    const glow = createGlowMaterial(); // one material for the violet arrow and the cyan route
+    const turnIntent = createTurnIntent(scene, glow);
+    const navOverlay = createNavOverlay(scene, glow);
 
     // --- Stick to roads
     const carPose = () => ({ x: car.position.x, z: car.position.z, heading: car.heading });
@@ -259,10 +265,20 @@ async function main(): Promise<void> {
       onOpenChange: onDialogOpenChange,
     });
 
+    /** The route to draw: while following it, and while rerouting (the old one stays until the new one comes). */
+    const drawnRoute = () => (navigation.state === 'active' || navigation.state === 'rerouting' ? navigation.route : null);
+
     const tileMap = createTileMap({
       tiles,
       townId: DEFAULT_TOWN,
       carPose: () => ({ x: car.position.x, z: car.position.z, heading: car.heading }),
+      route: () => {
+        const route = drawnRoute();
+        return route && {
+          points: route.points, along: navigation.along, destination: route.destination,
+          maneuvers: route.maneuvers.filter(m => isShown(m) && m.nodes.length).map(m => ({ x: m.wx, z: m.wz })),
+        };
+      },
       onOpenChange: onDialogOpenChange,
     });
 
@@ -376,8 +392,23 @@ async function main(): Promise<void> {
       tiles.updateLabels(car.heading);
       speedDisplay.setRoadLock(roadLock.active, roadLock.mode === 'free');
       const choosing = roadLock.active && car.speed >= 0; // reversing ignores the queued turn
-      turnIntent.update(choosing ? roadLock.intent : null, choosing ? roadLock.arrow() : null, t0 / 1000);
       navigation.update(dt, carPose(), car.speed, speedLimitKmh / 3.6);
+      const arrow = choosing ? roadLock.arrow() : null;
+      const route = drawnRoute();
+      let onRoute: NavTurn | undefined; // the arrowed junction where the queued turn is the route's
+      if (route) {
+        const graph = graphNear();
+        const planned = arrow ? roadLock.plannedExit() : null;
+        const at = planned?.edgePoint;
+        if (at) {
+          onRoute = navOverlay.turnsAhead(route, navigation.along, graph)
+            .find(t => t.exit.edgePoint && Math.hypot(t.exit.edgePoint.x - at.x, t.exit.edgePoint.z - at.z) < 1);
+        }
+        navOverlay.update(route, navigation.along, graph, onRoute && arrow ? { zone: onRoute.zone, path: arrow.path } : null);
+      } else {
+        navOverlay.update(null, 0, graphNear(), null);
+      }
+      turnIntent.update(choosing ? roadLock.intent : null, arrow, t0 / 1000, { onRoute: onRoute !== undefined });
       navCard.update(dt, navigation.view());
       navigationDialog.setActive(navigation.state !== 'idle');
       if (junctionDebug.visible) {

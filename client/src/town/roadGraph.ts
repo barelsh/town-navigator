@@ -10,6 +10,8 @@ import type { StreetSegment } from './roads.ts';
 
 export interface WorldBranch { heading: number; halfWidth: number; flow: 'both' | 'out' | 'in'; name?: string }
 export interface WorldJunction {
+  /** OSM node id, matched against a route's maneuver nodes (TN-40); null when the town has none. */
+  id: number | null;
   x: number;
   z: number;
   kind: 'junction' | 'dead_end';
@@ -62,7 +64,7 @@ export const headingOf = (dx: number, dy: number) => Math.atan2(dx, -dy);
 
 export function toWorldJunctions(junctions: Junction[] = []): WorldJunction[] {
   return junctions.map(j => ({
-    x: j.x, z: -j.y, kind: j.kind, control: j.control,
+    id: j.id ?? null, x: j.x, z: -j.y, kind: j.kind, control: j.control,
     branches: j.branches.map(b => ({
       heading: headingOf(b.dx, b.dy),
       halfWidth: (roadStyle({ highway: b.highway, lanes: b.lanes })?.width ?? 6) / 2,

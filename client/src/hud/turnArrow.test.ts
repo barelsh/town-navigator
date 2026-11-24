@@ -70,3 +70,43 @@ test('buildArrowArrays makes one mesh: three ribbons and a double head, all arra
   const body = arrays.along.slice(0, path.length * 2);
   assert.ok(body.every((v, i) => i < 2 || v >= body[i - 2]));
 });
+
+test('buildArrowArrays uses the given colour for halo, body and head; core stays white', async () => {
+  const { CYAN, VIOLET } = await import('./turnArrow.ts');
+  const path = arrowPath(entry, eastExit);
+  const n = path.length * 2;
+  const colorAt = (a: { colors: number[] }, v: number) => a.colors.slice(v * 4, v * 4 + 4);
+  const cyan = buildArrowArrays(path, EAST, 0, CYAN);
+  assert.deepEqual(colorAt(cyan, 0), [...CYAN, 0.3]);          // halo
+  assert.deepEqual(colorAt(cyan, n), [...CYAN, 1]);            // body
+  assert.deepEqual(colorAt(cyan, 2 * n), [1, 1, 1, 0.9]);      // core
+  assert.deepEqual(colorAt(cyan, 3 * n), [...CYAN, 0.3]);      // head halo
+  assert.deepEqual(colorAt(cyan, 3 * n + 3), [...CYAN, 1]);    // solid head
+  // Without a colour it is TN-37's violet, exactly as before.
+  assert.deepEqual(colorAt(buildArrowArrays(path, EAST), n), [...VIOLET, 1]);
+});
+
+test('buildRibbonArrays: n points → 2n vertices per layer, along counts meters, pieces stay separate', async () => {
+  const { buildRibbonArrays, appendArrays, LINE_LAYERS } = await import('./turnArrow.ts');
+  const a = [{ x: 0, z: 0 }, { x: 3, z: 4 }, { x: 3, z: 10 }];
+  const b = [{ x: 50, z: 0 }, { x: 60, z: 0 }];
+  const arrays = buildRibbonArrays([a, b, [{ x: 1, z: 1 }]], LINE_LAYERS, 0.05);
+  const layers = LINE_LAYERS.length;
+  assert.equal(arrays.along.length, (a.length + b.length) * 2 * layers, 'a single point makes nothing');
+  assert.equal(arrays.indices.length, ((a.length - 1) + (b.length - 1)) * 6 * layers);
+  assert.deepEqual(arrays.along.slice(0, 6), [0, 0, 5, 5, 11, 11]);
+  // The second piece counts from 0 again, and no triangle joins the two pieces.
+  const bStart = a.length * 2 * layers;
+  assert.deepEqual(arrays.along.slice(bStart, bStart + 4), [0, 0, 10, 10]);
+  for (let t = 0; t < arrays.indices.length; t += 3) {
+    const tri = arrays.indices.slice(t, t + 3);
+    assert.ok(tri.every(i => i < bStart) || tri.every(i => i >= bStart));
+  }
+  // Only the thin top layer flows; the line is 1.6 m wide at its halo.
+  assert.equal(arrays.core.filter(v => v === 1).length, (a.length + b.length) * 2);
+  assert.equal(Math.hypot(arrays.positions[0] - arrays.positions[3], arrays.positions[2] - arrays.positions[5]), 1.6);
+  // appendArrays shifts the second set's indices past the first.
+  const both = appendArrays(buildRibbonArrays([a], LINE_LAYERS), buildRibbonArrays([b], LINE_LAYERS));
+  assert.equal(both.along.length, arrays.along.length);
+  assert.deepEqual(both.indices, arrays.indices);
+});

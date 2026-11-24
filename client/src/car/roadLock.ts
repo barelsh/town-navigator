@@ -93,6 +93,11 @@ export interface RoadLock {
   steerHeld(held: boolean): void;
   autoSteer(pose: Pose, speed: number): number | null;
   arrow(): TurnArrow | null;
+  /**
+   * The exit the car will take at the zone it is approaching or is in: the free car's target, or the planned one ahead.
+   * Null when off, reversing, or with no target.
+   */
+  plannedExit(): ZoneExit | null;
   /** Fills `out` with the lock's internal state. Allocates nothing. */
   inspect(out: LockSnapshot): void;
 }
@@ -346,6 +351,7 @@ export function createRoadLock(options: RoadLockOptions = {}): RoadLock {
   let lastPose: Pose = { x: 0, z: 0, heading: 0 };
   const arrowView: TurnArrow = { version: 0, path: [], heading: 0 };
   let arrowOn = false;
+  let backing = false;                 // the last step or observe was reversing
 
   /** Shows `path` as the arrow. The same path object is not rebuilt: the version moves only when the path changes. */
   function showArrow(path: Vec2[]): void {
@@ -525,6 +531,7 @@ export function createRoadLock(options: RoadLockOptions = {}): RoadLock {
     get intent() { return intent; },
     get speedCap() { return cap; },
     arrow: () => (arrowOn ? arrowView : null),
+    plannedExit: () => (!active || backing ? null : (mode === 'free' ? target?.exit : plan?.target?.exit) ?? null),
 
     press(side) {
       if (!active || mode !== 'locked') return;
@@ -621,6 +628,7 @@ export function createRoadLock(options: RoadLockOptions = {}): RoadLock {
     },
 
     step(pose, speed, dt, graph) {
+      backing = speed < 0;
       if (!active || mode === 'free') return { ...pose, speed };
       if (!track && !seed(pose, graph)) return { ...pose, speed: 0 }; // no road loaded yet: wait
       const reversing = speed < 0;
@@ -689,6 +697,7 @@ export function createRoadLock(options: RoadLockOptions = {}): RoadLock {
     },
 
     observe(pose, speed, dt, graph) {
+      backing = speed < 0;
       if (!active || mode !== 'free' || !zone) return;
       lastPose = pose;
       if (graph !== zoneGraph) {

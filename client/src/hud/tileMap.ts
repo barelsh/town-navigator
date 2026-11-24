@@ -7,9 +7,20 @@ export interface TileMapOptions {
   tiles: TownTiles;
   townId: string;
   carPose(): { x: number; z: number; heading: number };
+  /** The route being navigated, in world meters (TN-40), and meters driven along it; null when not navigating. */
+  route?(): MapRoute | null;
   /** Called with true when the window opens and false when it closes. */
   onOpenChange(open: boolean): void;
 }
+
+export interface MapRoute {
+  points: { x: number; z: number }[];
+  along: number;
+  maneuvers: { x: number; z: number }[];
+  destination: { x: number; z: number };
+}
+
+const ROUTE_CYAN = '34, 211, 238';
 
 export interface TileMap {
   readonly isOpen: boolean;
@@ -22,7 +33,7 @@ const DIALOG_PADDING = 36; // 18 px each side, as in styles.css
 const WRAP_PADDING = 16;   // 8 px each side
 const fmt = (n: number) => (Math.round(n * 10) / 10).toFixed(1);
 
-export function createTileMap({ tiles, townId, carPose, onOpenChange }: TileMapOptions): TileMap {
+export function createTileMap({ tiles, townId, carPose, route, onOpenChange }: TileMapOptions): TileMap {
   const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const dialog = $<HTMLDialogElement>('tile-map-dialog');
   const canvas = $<HTMLCanvasElement>('tile-map-canvas');
@@ -124,6 +135,8 @@ export function createTileMap({ tiles, townId, carPose, onOpenChange }: TileMapO
     }
     ctx.setLineDash([]);
 
+    drawRoute(route?.() ?? null, mx, my);
+
     // The car. Heading 0 drives toward +z, which is south on the map, so the up-pointing arrow turns by PI - heading.
     const pose = carPose();
     ctx.save();
@@ -147,6 +160,53 @@ export function createTileMap({ tiles, townId, carPose, onOpenChange }: TileMapO
     foot.textContent = `${loaded} loaded · ${loading} loading · ${failed} failed · ${notLoaded} not loaded · `
       + `car in tile ${carTile.tx}, ${carTile.ty} (E ${fmt(where.x)}, N ${fmt(where.y)})`;
     showTip(statuses);
+  }
+
+  /** The route over the tiles: the part driven dimmed, a dot at each turn and a flag at the destination. */
+  function drawRoute(r: MapRoute | null, mx: (m: number) => number, my: (n: number) => number): void {
+    if (!r || r.points.length < 2) return;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2.5;
+    // Split at `along`: the driven part first, dimmed, then the rest.
+    let walked = 0, split = r.points.length - 1, cut = r.points[split];
+    for (let i = 1; i < r.points.length; i++) {
+      const a = r.points[i - 1], b = r.points[i], length = Math.hypot(b.x - a.x, b.z - a.z);
+      if (walked + length >= r.along) {
+        const t = length ? (r.along - walked) / length : 0;
+        split = i;
+        cut = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
+        break;
+      }
+      walked += length;
+    }
+    const stroke = (points: { x: number; z: number }[], alpha: number) => {
+      ctx.strokeStyle = `rgba(${ROUTE_CYAN}, ${alpha})`;
+      ctx.beginPath();
+      points.forEach((p, i) => (i ? ctx.lineTo(mx(p.x), my(-p.z)) : ctx.moveTo(mx(p.x), my(-p.z))));
+      ctx.stroke();
+    };
+    stroke([...r.points.slice(0, split), cut], 0.35);
+    stroke([cut, ...r.points.slice(split)], 1);
+    ctx.fillStyle = `rgb(${ROUTE_CYAN})`;
+    for (const m of r.maneuvers) {
+      ctx.beginPath();
+      ctx.arc(mx(m.x), my(-m.z), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // The flag: a pole from the destination with a pennant.
+    const fx = mx(r.destination.x), fy = my(-r.destination.z);
+    ctx.strokeStyle = '#141820';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - 14); ctx.stroke();
+    ctx.strokeStyle = `rgb(${ROUTE_CYAN})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - 14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(fx, fy - 14); ctx.lineTo(fx + 9, fy - 10.5); ctx.lineTo(fx, fy - 7); ctx.closePath();
+    ctx.fillStyle = `rgb(${ROUTE_CYAN})`;
+    ctx.strokeStyle = '#141820';
+    ctx.lineWidth = 1;
+    ctx.fill(); ctx.stroke();
   }
 
   // --- hover
