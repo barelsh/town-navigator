@@ -93,3 +93,5 @@ export interface TownTile extends Town {
 export interface ApiError {
   message: string;
 }
+
+export type * from './route.ts';

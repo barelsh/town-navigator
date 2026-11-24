@@ -22,6 +22,11 @@ async function readOptional(filePath: string): Promise<string | null> {
   }
 }
 
+/** The town's backend file path, or null when the id is invalid. The file may not exist. */
+export function townFilePath(id: string): string | null {
+  return VALID_TOWN_ID.test(id) ? path.join(DATA_DIR, townFileName(id)) : null;
+}
+
 /** Returns the normalized town, or null when the id is invalid or has no file. */
 export async function readTown(id: string): Promise<Town | null> {
   if (!VALID_TOWN_ID.test(id)) return null;

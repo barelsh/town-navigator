@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { DRIVABLE_HIGHWAYS, onewayOf, nodeDegrees } = require('./roadRules.js');
 
 const DATA_DIR = path.join(__dirname, '..');
 const TILES_DIR = path.join(DATA_DIR, 'tiles');
@@ -31,9 +32,6 @@ function townFileName(id) {
 const round = (value) => Math.round(value * 100) / 100; // 1 cm
 const r3 = (value) => Math.round(value * 1000) / 1000;
 
-// Keep in sync with ROAD_STYLES layer >= MIN_DRIVABLE_LAYER in client/src/town/roadStyles.ts.
-const DRIVABLE_HIGHWAYS = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'trunk_link', 'primary_link',
-  'secondary_link', 'tertiary_link', 'residential', 'unclassified', 'road', 'living_street', 'service']);
 const NODE_CONTROLS = new Set(['traffic_signals', 'stop', 'give_way', 'mini_roundabout', 'turning_circle']);
 
 // A tagged OSM node, kept as a Point in the backend town file only.
@@ -121,17 +119,23 @@ function buildJunctions(source, { useIds = true } = {}) {
       controls.set(Number(String(f.id).slice(5)), f.properties.highway);
     }
   }
-  for (const f of source.features) {
+  const roads = source.features.filter((f) => f.geometry?.type === 'LineString' && DRIVABLE_HIGHWAYS.has(f.properties?.highway));
+  const keyOf = (f, i) => {
+    const ids = useIds ? f.osm?.nodes : undefined;
+    const pos = f.geometry.coordinates[i];
+    return ids ? ids[i] : `${pos[0]},${pos[1]}`;
+  };
+  const degrees = nodeDegrees(roads, keyOf);
+  for (const f of roads) {
     const p = f.properties ?? {};
-    if (f.geometry?.type !== 'LineString' || !DRIVABLE_HIGHWAYS.has(p.highway)) continue;
     const c = f.geometry.coordinates;
     const ids = useIds ? f.osm?.nodes : undefined;
-    const forwardOnly = p.oneway === 'yes' || p.oneway === '1' || p.oneway === 'true' || p.junction === 'roundabout';
-    const backwardOnly = p.oneway === '-1';
+    const oneway = onewayOf(p);
+    const forwardOnly = oneway === 1;
+    const backwardOnly = oneway === -1;
     c.forEach((pos, i) => {
-      const key = ids ? ids[i] : `${pos[0]},${pos[1]}`;
-      const node = nodes.get(key) ?? { x: pos[0], y: pos[1], id: ids ? ids[i] : null, degree: 0, branches: [] };
-      node.degree += i === 0 || i === c.length - 1 ? 1 : 2;
+      const key = keyOf(f, i);
+      const node = nodes.get(key) ?? { x: pos[0], y: pos[1], id: ids ? ids[i] : null, degree: degrees.get(key), branches: [] };
       for (const [j, along] of [[i + 1, true], [i - 1, false]]) {
         if (j < 0 || j >= c.length) continue;
         const dx = c[j][0] - pos[0];

@@ -26,7 +26,8 @@ client/src/
 server/src/
   app.ts      Fastify app
   routes/     HTTP endpoints
-  services/   data access, future navigation logic
+  services/   data access
+  routing/    road graph, snapping, A* route search and maneuvers
 shared/src/   types shared by client and server
 data/         input files and scripts
 ```
@@ -39,7 +40,7 @@ data/         input files and scripts
 - `npm run dev` - run server and client with auto-reload, open http://localhost:5173
 - `npm run build` then `npm start` - run the built app, open http://localhost:3000
 - `npm run typecheck` - check types in all packages
-- `npm test` - run the unit tests (`client/src/**/*.test.ts`, e.g. the road graph) with Node's built-in test runner
+- `npm test` - run the unit tests (`client/src/**/*.test.ts` and `server/src/**/*.test.ts`, e.g. the road graph and routing) with Node's built-in test runner
 
 ### controls
 - `W` / `↑` accelerate, `S` / `↓` brake and reverse, `A` `D` / `←` `→` steer
@@ -81,6 +82,21 @@ In development (`npm run dev`) the client keeps a flight recorder: the last ~100
 - `GET /api/towns/:id/index` - the town's tile index, e.g. `/api/towns/rosh_haayin/index` reads `data/tiles/rosh_haayin/rosh_haayin_index.json`: tile size, grid range, bbox and the list of non-empty tiles with their counts
 - `GET /api/towns/:id/tiles/:tx/:ty` - one tile, e.g. `/api/towns/rosh_haayin/tiles/-1/-1` reads `data/tiles/rosh_haayin/rosh_haayin_-1_-1.geojson`. 404 for tiles that are not in the index
 - Both are cached for 5 minutes. Generate the files with `npm run tile -- <town>`. `GET /api/towns/:id` still returns the whole town, for debugging.
+- `POST /api/towns/:id/route` - the shortest legal route by distance; see Routing below
+
+### routing
+`POST /api/towns/:id/route` with `{ "from": { "x", "y", "bearing" }, "to": { "x", "y" } }` in the town's map meters (x east, y north; bearing in degrees clockwise from north) returns a `Route` (`shared/src/route.ts`): the distance, the polyline, one stretch per road piece (highway, one-way, name), the snapped start and destination, and one maneuver per junction (`roundabout` with its exit number, `left`, `slight_right`, ...).
+
+```
+curl -s -X POST localhost:3000/api/towns/rosh_haayin/route -H 'content-type: application/json' \
+  -d '{"from":{"x":-18.3,"y":-7.9,"bearing":0},"to":{"x":-2009,"y":609}}'
+```
+
+- The server builds the town's road graph from `data/town_meters_<town>.geojson` on the first route request (roads cut at every junction and dead end, by OSM node id), keeps it in memory, and rebuilds it when the file changes. Rosh HaAyin: 2,370 nodes and 4,636 directed edges, built in about 20 ms.
+- The search is edge-based A* with the straight line to the destination as its heuristic, so it returns the same shortest route as Dijkstra while settling far fewer edges; a route takes a few milliseconds.
+- Respected: one-way roads (`oneway`, `junction=roundabout`, the same rules as the tiler, shared in `data/scripts/roadRules.js`), turn restrictions with a via node, and no U-turns except at dead ends. The car joins the road in the direction it faces; turning back costs 50 m.
+- Not respected: turn restrictions with a via way (skipped and counted in the log), access tags, speeds and traffic signals. The cost is distance only.
+- Errors: 400 for a bad body, 404 for an unknown town, 422 when no road is within 60 m of either end or there is no legal route.
 
 
 ### data
